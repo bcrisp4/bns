@@ -8,6 +8,19 @@ import (
 	"codeberg.org/miekg/dns"
 )
 
+// MetricsObserver is the subset of *metrics.Metrics the cache needs.
+// Defined here so the cache package doesn't import internal/metrics directly
+// (which would create an import cycle: metrics → cache is fine, but not the reverse).
+type MetricsObserver interface {
+	SetEntries(n int)
+	IncEvictions()
+}
+
+type nopObserver struct{}
+
+func (nopObserver) SetEntries(int) {}
+func (nopObserver) IncEvictions()  {}
+
 // LRU is a bounded TTL-aware LRU cache for DNS responses.
 //
 // Invariants:
@@ -28,6 +41,7 @@ type LRU struct {
 	capacity int
 	list     *list.List // front == most recently used
 	entries  map[string]*list.Element
+	observer MetricsObserver
 }
 
 // entry is the value stored in each list element.
@@ -49,7 +63,20 @@ func NewLRU(capacity int) *LRU {
 		capacity: capacity,
 		list:     list.New(),
 		entries:  make(map[string]*list.Element, capacity),
+		observer: nopObserver{},
 	}
+}
+
+// SetObserver wires in a MetricsObserver so the cache can report entry count
+// and eviction events. A nil argument falls back to the no-op observer.
+func (c *LRU) SetObserver(obs MetricsObserver) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if obs == nil {
+		c.observer = nopObserver{}
+		return
+	}
+	c.observer = obs
 }
 
 // Len returns the current number of entries in the cache.
@@ -97,7 +124,9 @@ func (c *LRU) Store(key string, msg *dns.Msg, ttl time.Duration, negative bool) 
 		}
 		c.list.Remove(oldest)
 		delete(c.entries, oldest.Value.(*entry).key)
+		c.observer.IncEvictions()
 	}
+	c.observer.SetEntries(c.list.Len())
 }
 
 // Get returns a deep-copy of the cached response for key, with TTLs
@@ -117,6 +146,8 @@ func (c *LRU) Get(key string) (*dns.Msg, bool) {
 		// Lazy eviction: remove the expired entry on access.
 		c.list.Remove(el)
 		delete(c.entries, key)
+		c.observer.IncEvictions()
+		c.observer.SetEntries(c.list.Len())
 		return nil, false
 	}
 

@@ -103,6 +103,18 @@ func New(reg prometheus.Registerer) *Metrics {
 	return m
 }
 
+// CacheObserver returns an object satisfying cache.MetricsObserver
+// (defined in internal/cache) for this Metrics bundle. The cache package
+// uses a local interface to avoid an import cycle.
+func (m *Metrics) CacheObserver() *cacheObserver {
+	return &cacheObserver{m: m}
+}
+
+type cacheObserver struct{ m *Metrics }
+
+func (o *cacheObserver) SetEntries(n int) { o.m.CacheEntries.Set(float64(n)) }
+func (o *cacheObserver) IncEvictions()    { o.m.CacheEvictionsTotal.Inc() }
+
 // NormalizeQType collapses an uncommon DNS qtype into "other" so the
 // {qtype=} label can never grow without bound.
 func NormalizeQType(qtype string) string {

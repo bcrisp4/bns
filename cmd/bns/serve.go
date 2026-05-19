@@ -106,6 +106,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	pool := upstream.NewPool(ups)
 
 	lru := cache.NewLRU(cfg.Cache.Capacity)
+	lru.SetObserver(mtr.CacheObserver())
 	mtr.CacheCapacity.Set(float64(cfg.Cache.Capacity))
 
 	chainResolver := chain.Build(chain.Deps{
