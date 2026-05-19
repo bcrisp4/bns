@@ -33,7 +33,7 @@ func TestPool_PrimarySucceeds(t *testing.T) {
 	p := upstream.NewPool([]upstream.Upstream{
 		&fakeUpstream{name: "p", resp: ok},
 		&fakeUpstream{name: "f", err: errors.New("should not be called")},
-	})
+	}, nil, nil)
 	req := dns.NewMsg("example.com.", dns.TypeA)
 	resp, err := p.Exchange(context.Background(), req)
 	require.NoError(t, err)
@@ -46,7 +46,7 @@ func TestPool_FallbackOnError(t *testing.T) {
 	p := upstream.NewPool([]upstream.Upstream{
 		&fakeUpstream{name: "p", err: errors.New("boom")},
 		&fakeUpstream{name: "f", resp: ok},
-	})
+	}, nil, nil)
 	req := dns.NewMsg("example.com.", dns.TypeA)
 	resp, err := p.Exchange(context.Background(), req)
 	require.NoError(t, err)
@@ -57,14 +57,14 @@ func TestPool_AllFail(t *testing.T) {
 	p := upstream.NewPool([]upstream.Upstream{
 		&fakeUpstream{name: "a", err: errors.New("a-fail")},
 		&fakeUpstream{name: "b", err: errors.New("b-fail")},
-	})
+	}, nil, nil)
 	req := dns.NewMsg("example.com.", dns.TypeA)
 	_, err := p.Exchange(context.Background(), req)
 	require.Error(t, err)
 }
 
 func TestPool_EmptyIsError(t *testing.T) {
-	p := upstream.NewPool(nil)
+	p := upstream.NewPool(nil, nil, nil)
 	_, err := p.Exchange(context.Background(), new(dns.Msg))
 	require.Error(t, err)
 }

@@ -100,10 +100,12 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	rdy.SetBlocklistReady(true)
 
 	ups := make([]upstream.Upstream, 0, len(cfg.Upstreams))
+	names := make([]string, 0, len(cfg.Upstreams))
 	for _, u := range cfg.Upstreams {
 		ups = append(ups, upstream.NewUDPClient(u.Addr, u.Timeout))
+		names = append(names, u.Addr)
 	}
-	pool := upstream.NewPool(ups)
+	pool := upstream.NewPool(ups, names, mtr)
 
 	lru := cache.NewLRU(cfg.Cache.Capacity)
 	lru.SetObserver(mtr.CacheObserver())

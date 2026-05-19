@@ -73,7 +73,7 @@ func TestMVP_AllSuccessCriteria(t *testing.T) {
 
 	pool := upstream.NewPool([]upstream.Upstream{
 		upstream.NewUDPClient(upAddr, 2*time.Second),
-	})
+	}, []string{upAddr}, mtr)
 	lru := cache.NewLRU(100)
 
 	chainResolver := chain.Build(chain.Deps{

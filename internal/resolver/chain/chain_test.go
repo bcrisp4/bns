@@ -29,7 +29,7 @@ func TestBuild_BlocklistShortCircuits(t *testing.T) {
 	okResp.Response = true
 
 	deps := chain.Deps{
-		Upstream:  upstream.NewPool([]upstream.Upstream{&stubUpstream{resp: okResp}}),
+		Upstream:  upstream.NewPool([]upstream.Upstream{&stubUpstream{resp: okResp}}, nil, nil),
 		Cache:     cache.NewLRU(10),
 		CacheCfg:  config.Cache{Capacity: 10, MaxTTL: 1 << 30, NegativeTTLMax: 1 << 30},
 		Blocklist: blocklist.NewHolder(blocklist.NewMatcher([]string{"ads.example.com"})),
