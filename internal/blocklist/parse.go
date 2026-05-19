@@ -48,7 +48,7 @@ func ParseLine(line string) (string, bool) {
 		return "", false
 	}
 
-	domain = strings.TrimSuffix(strings.ToLower(domain), ".")
+	domain = canonicalise(domain)
 	if !isValidFQDN(domain) {
 		return "", false
 	}
