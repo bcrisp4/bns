@@ -20,16 +20,69 @@ MVP shipped on `feat/mvp` (47 commits, not yet merged to `main`). All 17 interna
 - CLI: `cobra`. Config: `viper` (flags + env + YAML, in that precedence).
 - Health: `/healthz` (liveness), `/readyz` (readiness).
 
-## Architecture invariants
+## Architecture
 
-These come from the spec; preserve them when designing:
+`cmd/bns/main.go` parses flags, builds a signal-cancelled ctx, runs `serve.go:runServe`. `serve.go` wires every component and runs UDP+TCP listeners + admin HTTP + SIGHUP reload + shutdown under one `errgroup`.
 
-- **Two listeners**: UDP and TCP, same handler logic. Forward protocol pluggable — DoH/DoT/DoQ are future work but the forwarder interface should not preclude them.
-- **Blocklist matching** is exact + subdomain wildcard. `ads.com` blocks `ads.com` and `*.ads.com`. Capacity target: up to 1M entries (hagezi `pro.txt` ~471K today).
-- **Cache** is in-memory, bounded, TTL-aware, with eviction when full. Negative caching supported. Not persistent across restarts. Capacity configurable at runtime.
-- **Upstream dedup** via `singleflight` to coalesce concurrent identical queries.
-- **Thread-safety required everywhere** — listeners, cache, blocklist, metrics all hit concurrently.
-- **Query logging off by default**; gated behind config.
+### Package layout
+
+```
+cmd/bns/                          main + cobra serve subcommand + signal handling
+internal/config/                  viper schema + Load + Validate
+internal/logging/                 slog factories + QueryLog gate
+internal/blocklist/               Parse, FileSource, Matcher (parent-walk), Holder (atomic swap), Loader
+internal/cache/                   in-tree LRU + CloneMsg helper
+internal/upstream/                Upstream interface, UDPClient (TC=1 retry), Pool (primary+fallback)
+internal/resolver/                Resolver interface, Handler adapter (writes SERVFAIL on err),
+                                  Outcome classifier (ctx-marker for block vs upstream NXDOMAIN)
+internal/resolver/chain/          Build() composes the chain in canonical order
+internal/resolver/{block,cache,coalesce,forward,metric,qlog}stage/  one package per stage
+internal/metrics/                 Prometheus collectors + CacheObserver adapter
+internal/health/                  Readiness aggregator + /healthz + /readyz handlers
+internal/admin/                   Mux mounting /metrics + /healthz + /readyz
+internal/server/                  UDP+TCP dns.Server pair with NotifyStartedFunc Ready sync
+internal/upstream/testutil/       Spawn helper booting in-process dns.Server for tests
+internal/integration/             End-to-end MVP test
+```
+
+### Resolver chain (composed outside-in)
+
+```
+metrics → qlog → block → cache → coalesce → forward
+```
+
+- `metrics` (outermost): times every query, records `bns_queries_total{outcome,qtype}` + duration histogram, recovers panics into SERVFAIL + `bns_panics_total++`. Installs the block marker into ctx.
+- `qlog`: emits one JSON line per query (qname, qtype, outcome, duration_ms) — no-op when `query_log.enabled=false`.
+- `block`: `Holder.Current().Match(qname)` — on hit, calls `resolver.MarkBlocked(ctx)` and synthesises NXDOMAIN (sets Response=true, Rcode=NameError, copies ID + Question).
+- `cache`: lookup by `cache.Key(q)`; hit returns deep-copy with TTLs decremented by age; miss calls next, computes per-RR min TTL (capped by `cfg.Cache.MaxTTL`, negative-cache uses SOA Minttl capped by `NegativeTTLMax`), stores deep-copy.
+- `coalesce`: `singleflight.Group.Do` keyed by `cache.Key`; piggybacked callers get `cache.CloneMsg` of the originator's response; `shared==true` increments `bns_coalesced_queries_total`.
+- `forward` (terminal): hands req to the configured `upstream.Upstream` (the Pool).
+
+### Key interfaces (extensibility seams)
+
+| Interface              | Where                       | Contract                                                           | Future impls                       |
+| ---------------------- | --------------------------- | ------------------------------------------------------------------ | ---------------------------------- |
+| `resolver.Resolver`    | `internal/resolver`         | `Resolve(ctx, req) (*dns.Msg, error)` — never mutate req, never return both | DNSSEC validator, ECS, rewrites |
+| `upstream.Upstream`    | `internal/upstream`         | `Exchange(ctx, req) (*dns.Msg, error)`                              | DoH / DoT / DoQ clients           |
+| `blocklist.Source`     | `internal/blocklist`        | `Load(ctx) ([]string, error)` — return canonical lowercased FQDNs   | URL fetcher with refresh ticker   |
+| `logging.QueryLog`     | `internal/logging`          | `LogQuery(attrs ...slog.Attr)` — no-op when disabled                | (stable)                          |
+| `cache.MetricsObserver`| `internal/cache`            | `SetEntries(int)`, `IncEvictions()` — wired via `metrics.CacheObserver()` | (stable)                    |
+
+### Architecture invariants
+
+Preserve when designing:
+
+- **Two listeners** (UDP + TCP) share one `dns.Handler`. Forwarder protocol pluggable via `Upstream` interface.
+- **Blocklist matching** is exact + subdomain wildcard. `ads.com` blocks `ads.com` and `*.ads.com`. Capacity target up to 1M entries (hagezi `pro.txt` ~471K today).
+- **Cache** is in-memory, bounded, TTL-aware, lazy expiry on Get, LRU eviction on Store-when-full. Negative caching uses SOA MIN capped by `NegativeTTLMax`. Not persistent.
+- **Ownership of `*dns.Msg`**: cache and coalesce both deep-copy on store AND on get. The miekg server pools `*Msg` — aliasing a cached value with a live request corrupts both. Use `cache.CloneMsg`, NOT `m.Copy()` (shallow on RR slices).
+- **Upstream dedup** via `singleflight` (impl detail of `coalesce` package — don't reference singleflight from outside).
+- **Blocklist atomic swap**: `Holder` wraps `atomic.Pointer[Matcher]`. Readers do lock-free `Current().Match(qname)`. SIGHUP reload calls `Loader.Load`, builds a fresh `*Matcher`, `Holder.Swap(next)`.
+- **Server start/shutdown race**: `dns.Server.init` writes internal state inside `ListenAndServe`. Wait on `Server.Ready(ctx)` before declaring listeners up or invoking Shutdown.
+- **Resolver Resolve contract**: return `(resp, nil)` or `(nil, err)`, never `(resp, err)`. Implementations must not mutate req. Block stage and Handler synthesise responses with `Response=true`, `ID=req.ID`, `Question=req.Question`.
+- **Outcome label** carried via ctx-value (`resolver.MarkBlocked(ctx)` from blockstage; `resolver.Outcome(ctx, resp, err)` from metric + qlog stages) — keeps "blocked" (synthetic) distinct from "nxdomain" (upstream).
+- **Thread-safety required everywhere** — listeners, cache, blocklist, metrics all hit concurrently. Run `make race` before declaring done.
+- **Query logging off by default**; gated behind `logging.query_log.enabled`.
 
 ## Performance posture
 
