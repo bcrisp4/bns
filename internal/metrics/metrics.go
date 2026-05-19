@@ -11,7 +11,7 @@ import (
 // Metrics is the bundle of all BNS collectors.
 //
 // Cardinality discipline:
-//   - "outcome" ∈ {hit, miss, blocked, error} (4 values)
+//   - "outcome" ∈ {blocked, forwarded, error} (3 values)
 //   - "qtype" is restricted to a small allowlist via NormalizeQType (~10)
 //   - "upstream" cardinality = configured upstream count (2-3 typical)
 //   - NEVER add a qname label
@@ -92,11 +92,14 @@ func New(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(collectors.NewGoCollector())
 	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 
-	// Pre-initialize vec metrics with known label values so they appear in
-	// /metrics output even before any queries are processed. Without this,
-	// Gather() omits HistogramVec/CounterVec entries that have never been
-	// observed, which would make dashboards and alerts unreliable at startup.
-	for _, outcome := range []string{"hit", "miss", "blocked", "error", "forwarded"} {
+	// Pre-initialize vec metrics with the outcome values that are actually
+	// emitted so they appear in /metrics output even before any queries are
+	// processed. Without this, Gather() omits HistogramVec/CounterVec entries
+	// that have never been observed, which would make dashboards and alerts
+	// unreliable at startup. "hit" and "miss" are omitted — the resolver chain
+	// does not distinguish cache hits from forwarded responses at the outer
+	// metric stage.
+	for _, outcome := range []string{"blocked", "error", "forwarded"} {
 		m.QueryDurationSeconds.WithLabelValues(outcome)
 	}
 
