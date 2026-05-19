@@ -36,7 +36,7 @@ func (s *stage) Resolve(ctx context.Context, req *dns.Msg) (resp *dns.Msg, err e
 		if len(req.Question) > 0 {
 			qtype = metrics.NormalizeQType(dns.TypeToString[dns.RRToType(req.Question[0])])
 		}
-		outcome := outcomeFor(resp, err)
+		outcome := resolver.Outcome(resp, err)
 		s.m.QueriesTotal.WithLabelValues(outcome, qtype).Inc()
 		s.m.QueryDurationSeconds.WithLabelValues(outcome).
 			Observe(time.Since(start).Seconds())
@@ -44,17 +44,4 @@ func (s *stage) Resolve(ctx context.Context, req *dns.Msg) (resp *dns.Msg, err e
 
 	resp, err = s.next.Resolve(ctx, req)
 	return resp, err
-}
-
-func outcomeFor(resp *dns.Msg, err error) string {
-	switch {
-	case err != nil:
-		return "error"
-	case resp == nil:
-		return "error"
-	case resp.Rcode == uint16(dns.RcodeNameError):
-		return "blocked"
-	default:
-		return "forwarded"
-	}
 }

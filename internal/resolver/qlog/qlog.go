@@ -38,22 +38,8 @@ func (s *stage) Resolve(ctx context.Context, req *dns.Msg) (*dns.Msg, error) {
 	s.q.LogQuery(
 		slog.String("qname", qname),
 		slog.String("qtype", qtype),
-		slog.String("outcome", outcomeOf(resp, err)),
+		slog.String("outcome", resolver.Outcome(resp, err)),
 		slog.Float64("duration_ms", float64(time.Since(start).Microseconds())/1000),
 	)
 	return resp, err
-}
-
-// outcomeOf maps a resolver result to a short outcome label for log/metrics use.
-func outcomeOf(resp *dns.Msg, err error) string {
-	switch {
-	case err != nil:
-		return "error"
-	case resp == nil:
-		return "error"
-	case resp.Rcode == uint16(dns.RcodeNameError):
-		return "blocked-or-nxdomain"
-	default:
-		return "forwarded"
-	}
 }
