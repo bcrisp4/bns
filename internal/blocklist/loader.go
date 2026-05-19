@@ -30,7 +30,7 @@ func NewLoader(sources []Source) *Loader {
 // fails, the whole load fails and the caller should keep the previous
 // Matcher installed.
 func (l *Loader) Load(ctx context.Context) (*Matcher, int, error) {
-	all := make([]string, 0, 64*1024)
+	var all []string
 	for i, s := range l.sources {
 		entries, err := s.Load(ctx)
 		if err != nil {
