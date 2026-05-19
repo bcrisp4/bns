@@ -52,6 +52,9 @@ func Load(opts LoadOptions) (Config, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
+	if err := cfg.Validate(); err != nil {
+		return Config{}, fmt.Errorf("validate config: %w", err)
+	}
 	return cfg, nil
 }
 

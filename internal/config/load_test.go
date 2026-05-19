@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/bcrisp4/bns/internal/config"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,7 +37,12 @@ cache:
 func TestLoad_EnvOverridesYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bns.yaml")
-	require.NoError(t, os.WriteFile(path, []byte("listen:\n  udp: \":5353\"\n"), 0o644))
+	require.NoError(t, os.WriteFile(path, []byte(`listen:
+  udp: ":5353"
+upstreams:
+  - addr: "1.1.1.1:53"
+    timeout: 2s
+`), 0o644))
 
 	t.Setenv("BNS_LISTEN__UDP", ":6363")
 
@@ -46,7 +52,14 @@ func TestLoad_EnvOverridesYAML(t *testing.T) {
 }
 
 func TestLoad_NoConfigFileOK(t *testing.T) {
-	cfg, err := config.Load(config.LoadOptions{})
+	cfg, err := config.Load(config.LoadOptions{
+		FlagBinder: func(v *viper.Viper) error {
+			v.Set("upstreams", []map[string]any{
+				{"addr": "1.1.1.1:53", "timeout": "2s"},
+			})
+			return nil
+		},
+	})
 	require.NoError(t, err)
 	require.Equal(t, ":53", cfg.Listen.UDP)
 }
