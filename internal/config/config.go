@@ -32,11 +32,10 @@ type Upstream struct {
 
 // Cache configures the in-memory LRU cache.
 type Cache struct {
-	Capacity               int           `mapstructure:"capacity"`
-	MinTTL                 time.Duration `mapstructure:"min_ttl"`
-	MaxTTL                 time.Duration `mapstructure:"max_ttl"`
-	NegativeTTLMax         time.Duration `mapstructure:"negative_ttl_max"`
-	ServeStaleOnFailureTTL time.Duration `mapstructure:"serve_stale_on_failure_ttl"`
+	Capacity       int           `mapstructure:"capacity"`
+	MinTTL         time.Duration `mapstructure:"min_ttl"`
+	MaxTTL         time.Duration `mapstructure:"max_ttl"`
+	NegativeTTLMax time.Duration `mapstructure:"negative_ttl_max"`
 }
 
 // Blocklists configures the ad-blocking blocklist sources.
@@ -46,9 +45,8 @@ type Blocklists struct {
 
 // BlocklistSource is one source of blocklist entries.
 type BlocklistSource struct {
-	Type   string `mapstructure:"type"`   // "file"
-	Path   string `mapstructure:"path"`   // for type="file"
-	Format string `mapstructure:"format"` // "auto" | "domains" | "hosts"
+	Type string `mapstructure:"type"` // "file"
+	Path string `mapstructure:"path"` // for type="file"
 }
 
 // Admin configures the HTTP server hosting /metrics, /healthz, /readyz.

@@ -41,7 +41,7 @@ func TestLRU_StoreThenGet(t *testing.T) {
 	q := questionRR("example.com.", dns.TypeA, dns.ClassINET)
 	msg := buildA("example.com.", 300, "1.2.3.4")
 
-	c.Store(cache.Key(q), msg, 300*time.Second, false)
+	c.Store(cache.Key(q), msg, 300*time.Second)
 	got, ok := c.Get(cache.Key(q))
 	require.True(t, ok)
 	require.NotNil(t, got)
@@ -52,7 +52,7 @@ func TestLRU_GetReturnsDeepCopy(t *testing.T) {
 	c := cache.NewLRU(10)
 	q := questionRR("example.com.", dns.TypeA, dns.ClassINET)
 	msg := buildA("example.com.", 300, "1.2.3.4")
-	c.Store(cache.Key(q), msg, 300*time.Second, false)
+	c.Store(cache.Key(q), msg, 300*time.Second)
 
 	got1, _ := c.Get(cache.Key(q))
 	got2, _ := c.Get(cache.Key(q))
@@ -66,7 +66,7 @@ func TestLRU_StoreDeepCopiesInput(t *testing.T) {
 	c := cache.NewLRU(10)
 	q := questionRR("example.com.", dns.TypeA, dns.ClassINET)
 	msg := buildA("example.com.", 300, "1.2.3.4")
-	c.Store(cache.Key(q), msg, 300*time.Second, false)
+	c.Store(cache.Key(q), msg, 300*time.Second)
 
 	// Caller mutates after store -- cached entry must be untouched.
 	msg.Answer[0].Header().TTL = 1
@@ -79,7 +79,7 @@ func TestLRU_StoreDeepCopiesInput(t *testing.T) {
 func TestLRU_Expiry(t *testing.T) {
 	c := cache.NewLRU(10)
 	q := questionRR("example.com.", dns.TypeA, dns.ClassINET)
-	c.Store(cache.Key(q), buildA("example.com.", 300, "1.2.3.4"), 10*time.Millisecond, false)
+	c.Store(cache.Key(q), buildA("example.com.", 300, "1.2.3.4"), 10*time.Millisecond)
 
 	time.Sleep(20 * time.Millisecond)
 	_, ok := c.Get(cache.Key(q))
@@ -90,7 +90,7 @@ func TestLRU_Expiry(t *testing.T) {
 func TestLRU_TTLDecrementsByAge(t *testing.T) {
 	c := cache.NewLRU(10)
 	q := questionRR("example.com.", dns.TypeA, dns.ClassINET)
-	c.Store(cache.Key(q), buildA("example.com.", 300, "1.2.3.4"), 300*time.Second, false)
+	c.Store(cache.Key(q), buildA("example.com.", 300, "1.2.3.4"), 300*time.Second)
 
 	time.Sleep(15 * time.Millisecond)
 	got, ok := c.Get(cache.Key(q))
@@ -104,9 +104,9 @@ func TestLRU_EvictionWhenFull(t *testing.T) {
 	qa := questionRR("a.", dns.TypeA, dns.ClassINET)
 	qb := questionRR("b.", dns.TypeA, dns.ClassINET)
 	qc := questionRR("c.", dns.TypeA, dns.ClassINET)
-	c.Store(cache.Key(qa), buildA("a.", 60, "1.1.1.1"), time.Minute, false)
-	c.Store(cache.Key(qb), buildA("b.", 60, "1.1.1.1"), time.Minute, false)
-	c.Store(cache.Key(qc), buildA("c.", 60, "1.1.1.1"), time.Minute, false)
+	c.Store(cache.Key(qa), buildA("a.", 60, "1.1.1.1"), time.Minute)
+	c.Store(cache.Key(qb), buildA("b.", 60, "1.1.1.1"), time.Minute)
+	c.Store(cache.Key(qc), buildA("c.", 60, "1.1.1.1"), time.Minute)
 
 	_, okA := c.Get(cache.Key(qa))
 	_, okB := c.Get(cache.Key(qb))

@@ -50,7 +50,6 @@ type entry struct {
 	response  *dns.Msg
 	storedAt  time.Time
 	expiresAt time.Time
-	negative  bool // true for NXDOMAIN/NODATA negative cache entries
 }
 
 // NewLRU constructs an LRU with the given maximum entry count.
@@ -91,16 +90,14 @@ func (c *LRU) Capacity() int { return c.capacity }
 
 // Store inserts or replaces the entry for key. msg is deep-copied before
 // storage; the caller may continue to use or mutate the original safely.
-// ttl is the wall-clock lifetime of this entry; negative marks the entry
-// as a negative cache result (NXDOMAIN/NODATA).
-func (c *LRU) Store(key string, msg *dns.Msg, ttl time.Duration, negative bool) {
+// ttl is the wall-clock lifetime of this entry.
+func (c *LRU) Store(key string, msg *dns.Msg, ttl time.Duration) {
 	now := time.Now()
 	e := &entry{
 		key:       key,
 		response:  CloneMsg(msg), // deep-copy: caller owns the original
 		storedAt:  now,
 		expiresAt: now.Add(ttl),
-		negative:  negative,
 	}
 
 	c.mu.Lock()

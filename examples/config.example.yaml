@@ -14,13 +14,11 @@ cache:
   min_ttl: 0s
   max_ttl: 86400s
   negative_ttl_max: 900s
-  serve_stale_on_failure_ttl: 5s
 
 blocklists:
   sources:
     - type: file
       path: ./examples/sample-blocklist.txt
-      format: auto
 
 admin:
   listen: ":9090"

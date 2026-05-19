@@ -69,7 +69,6 @@ func bindDefaults(v *viper.Viper, d Config) {
 	v.SetDefault("cache.min_ttl", d.Cache.MinTTL)
 	v.SetDefault("cache.max_ttl", d.Cache.MaxTTL)
 	v.SetDefault("cache.negative_ttl_max", d.Cache.NegativeTTLMax)
-	v.SetDefault("cache.serve_stale_on_failure_ttl", d.Cache.ServeStaleOnFailureTTL)
 
 	v.SetDefault("admin.listen", d.Admin.Listen)
 

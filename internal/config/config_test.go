@@ -18,7 +18,6 @@ func TestDefaultsFillEverything(t *testing.T) {
 	require.Equal(t, 10000, cfg.Cache.Capacity)
 	require.Equal(t, 24*time.Hour, cfg.Cache.MaxTTL)
 	require.Equal(t, 15*time.Minute, cfg.Cache.NegativeTTLMax)
-	require.Equal(t, 5*time.Second, cfg.Cache.ServeStaleOnFailureTTL)
 
 	require.Equal(t, ":9090", cfg.Admin.Listen)
 	require.Equal(t, "info", cfg.Logging.Level)

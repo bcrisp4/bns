@@ -18,11 +18,10 @@ import (
 
 func defaults() config.Cache {
 	return config.Cache{
-		Capacity:               100,
-		MinTTL:                 0,
-		MaxTTL:                 24 * time.Hour,
-		NegativeTTLMax:         15 * time.Minute,
-		ServeStaleOnFailureTTL: 5 * time.Second,
+		Capacity:       100,
+		MinTTL:         0,
+		MaxTTL:         24 * time.Hour,
+		NegativeTTLMax: 15 * time.Minute,
 	}
 }
 

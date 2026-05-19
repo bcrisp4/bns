@@ -56,9 +56,9 @@ func (s *stage) Resolve(ctx context.Context, req *dns.Msg) (*dns.Msg, error) {
 		return resp, nil
 	}
 
-	ttl, negative := computeTTL(resp, s.cfg)
+	ttl, _ := computeTTL(resp, s.cfg)
 	if ttl > 0 {
-		s.store.Store(key, resp, ttl, negative)
+		s.store.Store(key, resp, ttl)
 	}
 	return resp, nil
 }
