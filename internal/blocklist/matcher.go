@@ -6,7 +6,7 @@ import "strings"
 // A blocked entry "ads.example.com" matches the exact name and any subdomain.
 //
 // Matcher is read-only after construction. To reload, build a new Matcher
-// and atomically swap (see Holder, Task 10).
+// and atomically swap it via Holder.
 type Matcher struct {
 	set map[string]struct{}
 }

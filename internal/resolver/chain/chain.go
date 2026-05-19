@@ -28,7 +28,7 @@ type Deps struct {
 	Metrics   *metrics.Metrics
 }
 
-// Build composes the resolver chain in the order documented in spec §5.4:
+// Build composes the resolver chain in the order:
 //
 //	metrics → query-log → blocklist → cache → coalesce → forward
 //

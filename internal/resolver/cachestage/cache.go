@@ -3,7 +3,7 @@
 // On every query it first checks the LRU cache. A hit short-circuits the
 // chain and returns the stored response with the caller's ID stamped in.
 // A miss delegates to the next Resolver and then stores the result according
-// to TTL rules derived from spec §5.5:
+// to TTL rules:
 //
 //   - Positive (NOERROR + answers): TTL = min(all-section-min, cfg.MaxTTL),
 //     floored at cfg.MinTTL. Do not cache if no TTL information exists.

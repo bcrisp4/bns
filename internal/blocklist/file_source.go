@@ -15,7 +15,7 @@ type FileSource struct {
 
 // Load reads the file, parses each line, and returns the unique FQDNs
 // the file contains. Malformed lines are dropped silently here; the
-// loader (Task 11) reports aggregate parse-error counts.
+// loader reports aggregate parse-error counts.
 func (s FileSource) Load(ctx context.Context) ([]string, error) {
 	f, err := os.Open(s.Path)
 	if err != nil {

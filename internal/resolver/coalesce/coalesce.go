@@ -1,8 +1,7 @@
 // Package coalesce deduplicates concurrent identical in-flight DNS queries
-// into a single call to the next stage.
-//
-// Implementation today: golang.org/x/sync/singleflight. The package name
-// hides this so the impl can change later without API or dashboard churn.
+// into a single call to the next stage using singleflight. The package name
+// decouples callers from the implementation so it can change without API or
+// dashboard churn.
 package coalesce
 
 import (

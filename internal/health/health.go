@@ -1,5 +1,4 @@
-// Package health implements /healthz (liveness) and /readyz (readiness)
-// probes per spec §5.10.
+// Package health implements /healthz (liveness) and /readyz (readiness) probes.
 package health
 
 import (
