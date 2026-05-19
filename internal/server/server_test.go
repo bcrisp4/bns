@@ -39,8 +39,9 @@ func TestServer_UDPAndTCPAnswerQueries(t *testing.T) {
 		_ = srv.Shutdown(ctx)
 	}()
 
-	// Wait briefly for server to be ready
-	time.Sleep(50 * time.Millisecond)
+	readyCtx, readyCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer readyCancel()
+	require.NoError(t, srv.Ready(readyCtx))
 
 	for _, network := range []string{"udp", "tcp"} {
 		t.Run(network, func(t *testing.T) {

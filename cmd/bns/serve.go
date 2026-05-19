@@ -127,7 +127,6 @@ func runServe(ctx context.Context, cfg config.Config) error {
 		return fmt.Errorf("bind tcp %s: %w", cfg.Listen.TCP, err)
 	}
 	dnsSrv := server.New(udpConn, tcpLn, handler)
-	rdy.SetListenersReady(true)
 
 	adminLn, err := net.Listen("tcp", cfg.Admin.Listen)
 	if err != nil {
@@ -143,6 +142,17 @@ func runServe(ctx context.Context, cfg config.Config) error {
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return dnsSrv.Serve() })
+	// Wait for both listeners to be actually serving before flipping the
+	// readiness flag (and before any shutdown could race with init).
+	g.Go(func() error {
+		readyCtx, cancel := context.WithTimeout(gctx, cfg.StartupProbeTimeout)
+		defer cancel()
+		if err := dnsSrv.Ready(readyCtx); err != nil {
+			return fmt.Errorf("dns listeners not ready: %w", err)
+		}
+		rdy.SetListenersReady(true)
+		return nil
+	})
 	g.Go(func() error {
 		if err := adminSrv.Serve(); !errors.Is(err, http.ErrServerClosed) {
 			return err
