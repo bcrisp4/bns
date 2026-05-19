@@ -3,7 +3,6 @@
 package scenarios
 
 import (
-	"io"
 	"time"
 
 	"github.com/bcrisp4/bns/internal/stress"
@@ -12,7 +11,8 @@ import (
 
 // NewMixed returns the mixed-realistic scenario: ~70% cache-hot, ~20%
 // cold, ~10% blocked, A+AAAA per name, probability 0.7 to randomise
-// across workers.
+// across workers. Framework-level fields (Writer, Silent, ProgressBar,
+// JSON) are applied centrally by the orchestrator via stdSilent.
 func NewMixed() stress.Scenario {
 	return stress.Scenario{
 		Name: "mixed",
@@ -26,14 +26,9 @@ func NewMixed() stress.Scenario {
 				Queries:     []string{"@scripts/stress/queries/mixed.txt"},
 				Recurse:     true,
 				Rcodes:      true,
-				HistDisplay: false,
 				HistPre:     dnsbench.DefaultHistPrecision,
 				HistMin:     0,
 				HistMax:     dnsbench.DefaultRequestTimeout,
-				Writer:      io.Discard,
-				Silent:      true,
-				ProgressBar: false,
-				JSON:        false,
 			}
 		},
 	}

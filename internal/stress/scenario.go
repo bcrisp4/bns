@@ -38,7 +38,6 @@ func LookupScenario(name string) (Scenario, bool) {
 }
 
 // stdSilent applies the universal "no stdout, no progress bar" flags.
-// Scenarios call it to keep the Build function focused on knobs.
 func stdSilent(b *dnsbench.Benchmark) {
 	b.Writer = io.Discard
 	b.Silent = true

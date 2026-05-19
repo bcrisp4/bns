@@ -35,6 +35,7 @@ type ReportInput struct {
 	CacheEvictions   int64
 	Panics           int64
 
+	OutDir    string // per-run directory, used to build pprof command hints
 	PprofCPU  string
 	PprofHeap string
 }
@@ -98,12 +99,16 @@ func Render(in ReportInput) string {
 	fmt.Fprintf(&sb, "- panics: %s\n", formatInt(in.Panics))
 
 	if in.PprofCPU != "" || in.PprofHeap != "" {
+		dir := in.OutDir
+		if dir == "" {
+			dir = "dist/stress/<this-dir>"
+		}
 		sb.WriteString("\n## Profiles\n")
 		if in.PprofCPU != "" {
-			fmt.Fprintf(&sb, "- CPU: %s   — `go tool pprof -top dist/stress/<this-dir>/%s`\n", in.PprofCPU, in.PprofCPU)
+			fmt.Fprintf(&sb, "- CPU: %s   — `go tool pprof -top %s/%s`\n", in.PprofCPU, dir, in.PprofCPU)
 		}
 		if in.PprofHeap != "" {
-			fmt.Fprintf(&sb, "- Heap: %s — `go tool pprof -top dist/stress/<this-dir>/%s`\n", in.PprofHeap, in.PprofHeap)
+			fmt.Fprintf(&sb, "- Heap: %s — `go tool pprof -top %s/%s`\n", in.PprofHeap, dir, in.PprofHeap)
 		}
 	}
 

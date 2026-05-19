@@ -22,9 +22,6 @@ func TestMixed_BuildPopulatesBenchmark(t *testing.T) {
 	require.InDelta(t, 0.7, b.Probability, 0.0001)
 	require.Equal(t, []string{"@scripts/stress/queries/mixed.txt"}, b.Queries)
 	require.True(t, b.Recurse)
-	require.True(t, b.Silent)
-	require.False(t, b.ProgressBar)
-	require.False(t, b.JSON)
 	require.True(t, b.Rcodes)
 }
 

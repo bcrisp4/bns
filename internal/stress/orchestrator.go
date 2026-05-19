@@ -19,8 +19,12 @@ import (
 	"github.com/tantalor93/dnspyre/v3/pkg/reporter"
 )
 
-// AdminBaseURL returns "http://" + admin host:port. The orchestrator
-// passes this into FetchSnapshot and the pprof helpers.
+const (
+	defaultMockAddr   = "127.0.0.1:5355"
+	readyProbeTimeout = 2 * time.Second
+)
+
+// AdminBaseURL returns "http://" + admin host:port.
 func AdminBaseURL(adminHostPort string) string {
 	return "http://" + adminHostPort
 }
@@ -28,7 +32,7 @@ func AdminBaseURL(adminHostPort string) string {
 // WaitForReady polls <baseURL>/readyz every interval until it returns
 // HTTP 200, or ctx is cancelled / deadline exceeded.
 func WaitForReady(ctx context.Context, baseURL string, interval time.Duration) error {
-	client := &http.Client{Timeout: 2 * time.Second}
+	client := &http.Client{Timeout: readyProbeTimeout}
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -151,10 +155,9 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 
 	var bnsCmd, mockCmd *exec.Cmd
 	if cfg.Spawn {
-		mockAddr := "127.0.0.1:5355"
 		mockCmd = exec.CommandContext(ctx, cfg.MockBin,
-			"--listen.udp", mockAddr,
-			"--listen.tcp", mockAddr,
+			"--listen.udp", defaultMockAddr,
+			"--listen.tcp", defaultMockAddr,
 		)
 		mockCmd.Stdout = mockLog
 		mockCmd.Stderr = mockLog
@@ -179,7 +182,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		bnsCmd = exec.CommandContext(ctx, cfg.BNSBin, "serve",
 			"--listen.udp", cfg.Target,
 			"--listen.tcp", cfg.Target,
-			"--upstream", mockAddr,
+			"--upstream", defaultMockAddr,
 			"--pprof",
 		)
 		bnsCmd.Env = append(os.Environ(), bnsEnv...)
@@ -289,12 +292,13 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		Panics:           d.Panics,
 	}
 
+	sha := gitSha()
 	report := Render(ReportInput{
 		Scenario:         cfg.Scenario,
 		StartedAt:        start,
 		Target:           cfg.Target,
 		Admin:            cfg.Admin,
-		BNSGitSha:        gitSha(),
+		BNSGitSha:        sha,
 		GoVersion:        runtime.Version(),
 		Host:             hostString(),
 		Duration:         cfg.Duration,
@@ -311,6 +315,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		CoalescedQueries: res.CoalescedQueries,
 		CacheEvictions:   res.CacheEvictions,
 		Panics:           res.Panics,
+		OutDir:           cfg.OutDir,
 		PprofCPU:         "cpu.pprof",
 		PprofHeap:        "heap.pprof",
 	})
@@ -324,7 +329,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		"admin":       cfg.Admin,
 		"duration":    cfg.Duration.String(),
 		"concurrency": cfg.Concurrency,
-		"git_sha":     gitSha(),
+		"git_sha":     sha,
 		"go_version":  runtime.Version(),
 	}, "", "  ")
 	if err == nil {
