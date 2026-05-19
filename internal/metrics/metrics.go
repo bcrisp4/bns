@@ -11,7 +11,7 @@ import (
 // Metrics is the bundle of all BNS collectors.
 //
 // Cardinality discipline:
-//   - "outcome" ∈ {blocked, forwarded, error} (3 values)
+//   - "outcome" ∈ {blocked, nxdomain, forwarded, error} (4 values)
 //   - "qtype" is restricted to a small allowlist via NormalizeQType (~10)
 //   - "upstream" cardinality = configured upstream count (2-3 typical)
 //   - NEVER add a qname label
@@ -99,7 +99,7 @@ func New(reg prometheus.Registerer) *Metrics {
 	// unreliable at startup. "hit" and "miss" are omitted — the resolver chain
 	// does not distinguish cache hits from forwarded responses at the outer
 	// metric stage.
-	for _, outcome := range []string{"blocked", "error", "forwarded"} {
+	for _, outcome := range []string{"blocked", "error", "forwarded", "nxdomain"} {
 		m.QueryDurationSeconds.WithLabelValues(outcome)
 	}
 

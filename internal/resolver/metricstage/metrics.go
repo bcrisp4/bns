@@ -25,6 +25,7 @@ func New(next resolver.Resolver, m *metrics.Metrics) resolver.Resolver {
 
 func (s *stage) Resolve(ctx context.Context, req *dns.Msg) (resp *dns.Msg, err error) {
 	start := time.Now()
+	ctx, _ = resolver.WithBlockMarker(ctx)
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -36,7 +37,7 @@ func (s *stage) Resolve(ctx context.Context, req *dns.Msg) (resp *dns.Msg, err e
 		if len(req.Question) > 0 {
 			qtype = metrics.NormalizeQType(dns.TypeToString[dns.RRToType(req.Question[0])])
 		}
-		outcome := resolver.Outcome(resp, err)
+		outcome := resolver.Outcome(ctx, resp, err)
 		s.m.QueriesTotal.WithLabelValues(outcome, qtype).Inc()
 		s.m.QueryDurationSeconds.WithLabelValues(outcome).
 			Observe(time.Since(start).Seconds())

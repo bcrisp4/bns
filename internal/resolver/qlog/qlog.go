@@ -38,7 +38,7 @@ func (s *stage) Resolve(ctx context.Context, req *dns.Msg) (*dns.Msg, error) {
 	s.q.LogQuery(
 		slog.String("qname", qname),
 		slog.String("qtype", qtype),
-		slog.String("outcome", resolver.Outcome(resp, err)),
+		slog.String("outcome", resolver.Outcome(ctx, resp, err)),
 		slog.Float64("duration_ms", float64(time.Since(start).Microseconds())/1000),
 	)
 	return resp, err

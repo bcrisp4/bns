@@ -32,6 +32,7 @@ func (s *stage) Resolve(ctx context.Context, req *dns.Msg) (*dns.Msg, error) {
 	if !m.Match(qname) {
 		return s.next.Resolve(ctx, req)
 	}
+	resolver.MarkBlocked(ctx)
 	resp := new(dns.Msg)
 	resp.Response = true
 	resp.ID = req.ID
