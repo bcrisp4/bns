@@ -100,7 +100,17 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	holder := blocklist.NewHolder(initial)
 	mtr.BlocklistEntries.Set(float64(initial.Size()))
 	mtr.BlocklistLoadedTimestamp.Set(float64(time.Now().Unix()))
-	logger.Info("blocklist loaded", "raw", count, "unique", initial.Size())
+	switch {
+	case len(cfg.Blocklists.Sources) == 0:
+		logger.Warn("no blocklist sources configured — block stage is a no-op",
+			"raw", count, "unique", initial.Size())
+	case initial.Size() == 0:
+		logger.Warn("blocklist sources configured but yielded zero entries — check paths and file contents",
+			"sources", len(cfg.Blocklists.Sources), "raw", count, "unique", initial.Size())
+	default:
+		logger.Info("blocklist loaded",
+			"sources", len(cfg.Blocklists.Sources), "raw", count, "unique", initial.Size())
+	}
 	rdy.SetBlocklistReady(true)
 
 	ups := make([]upstream.Upstream, 0, len(cfg.Upstreams))

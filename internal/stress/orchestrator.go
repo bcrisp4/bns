@@ -1,6 +1,7 @@
 package stress
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"codeberg.org/miekg/dns"
+	"github.com/tantalor93/dnspyre/v3/pkg/dnsbench"
 	"github.com/tantalor93/dnspyre/v3/pkg/reporter"
 )
 
@@ -173,13 +175,17 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 			"BNS_CACHE__CAPACITY":             "10000",
 			"BNS_ADMIN__LISTEN":               cfg.Admin,
 		})
-		if cfg.BlocklistPath != "" {
-			bnsEnv = append(bnsEnv,
-				"BNS_BLOCKLISTS__SOURCES__0__TYPE=file",
-				"BNS_BLOCKLISTS__SOURCES__0__PATH="+cfg.BlocklistPath,
-			)
+
+		// Viper's AutomaticEnv does not handle slice indexing via env vars, so
+		// blocklists.sources must be expressed in YAML. Write a temp config and
+		// pass -c. Scalar overrides still flow through env or CLI flags.
+		bnsConfigPath, err := writeBNSConfig(cfg.OutDir, cfg.BlocklistPath)
+		if err != nil {
+			return Result{}, fmt.Errorf("write bns config: %w", err)
 		}
+
 		bnsCmd = exec.CommandContext(ctx, cfg.BNSBin, "serve",
+			"-c", bnsConfigPath,
 			"--listen.udp", cfg.Target,
 			"--listen.tcp", cfg.Target,
 			"--upstream", defaultMockAddr,
@@ -218,10 +224,15 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		return Result{}, err
 	}
 
+	// Separate client for pprof: CPU profile blocks for cfg.PprofCPU before
+	// returning headers, so it needs a timeout sized to that duration plus
+	// transfer slack.
+	pprofClient := &http.Client{Timeout: cfg.PprofCPU + 30*time.Second}
+
 	pprofErr := make(chan error, 1)
 	if cfg.PprofCPU > 0 {
 		go func() {
-			pprofErr <- capturePprof(ctx, httpClient,
+			pprofErr <- capturePprof(ctx, pprofClient,
 				fmt.Sprintf("%s/debug/pprof/profile?seconds=%d", baseURL, int(cfg.PprofCPU.Seconds())),
 				filepath.Join(cfg.OutDir, "cpu.pprof"))
 		}()
@@ -235,6 +246,12 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	if cfg.RateLimit > 0 {
 		b.Rate = cfg.RateLimit
 	}
+	// @<path> entries are kingpin CLI sugar, not dnspyre library behaviour.
+	// Library callers must expand them before Run; otherwise the literal
+	// "@<path>" becomes a single hostname queried millions of times.
+	if err := expandFileRefs(&b); err != nil {
+		return Result{}, fmt.Errorf("expand queries: %w", err)
+	}
 	results, err := b.Run(ctx)
 	if err != nil {
 		return Result{}, fmt.Errorf("dnspyre run: %w", err)
@@ -246,7 +263,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	}
 
 	if cfg.PprofHeap {
-		if err := capturePprof(ctx, httpClient,
+		if err := capturePprof(ctx, pprofClient,
 			baseURL+"/debug/pprof/heap",
 			filepath.Join(cfg.OutDir, "heap.pprof")); err != nil {
 			_ = os.WriteFile(filepath.Join(cfg.OutDir, "heap.pprof.err"), []byte(err.Error()), 0o644)
@@ -384,6 +401,58 @@ func capturePprof(ctx context.Context, c *http.Client, url, outPath string) erro
 	defer f.Close()
 	_, err = io.Copy(f, resp.Body)
 	return err
+}
+
+// writeBNSConfig generates a minimal YAML config file in outDir, returning
+// its path. Viper does not handle slice indexing via env vars, so blocklist
+// sources must be supplied via YAML. The file is named bns-config.yaml so
+// it is archived alongside the other per-run artefacts.
+// expandFileRefs replaces any `@<path>` entry in b.Queries with the lines
+// of that file. The `@` prefix is kingpin v2 (dnspyre's CLI parser) sugar;
+// when calling the dnspyre library directly we have to do the expansion
+// ourselves. Non-@ entries pass through unchanged.
+func expandFileRefs(b *dnsbench.Benchmark) error {
+	out := make([]string, 0, len(b.Queries))
+	for _, q := range b.Queries {
+		if !strings.HasPrefix(q, "@") {
+			out = append(out, q)
+			continue
+		}
+		path := q[1:]
+		f, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("open %s: %w", path, err)
+		}
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			out = append(out, line)
+		}
+		if err := scanner.Err(); err != nil {
+			f.Close()
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+		f.Close()
+	}
+	b.Queries = out
+	return nil
+}
+
+func writeBNSConfig(outDir, blocklistPath string) (string, error) {
+	path := filepath.Join(outDir, "bns-config.yaml")
+	var sb strings.Builder
+	if blocklistPath != "" {
+		sb.WriteString("blocklists:\n  sources:\n")
+		fmt.Fprintf(&sb, "    - type: file\n      path: %q\n", blocklistPath)
+	}
+	if err := os.WriteFile(path, []byte(sb.String()), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func gitSha() string {
