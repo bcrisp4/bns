@@ -2,6 +2,7 @@
 package logging
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"strings"
@@ -58,5 +59,5 @@ func (noopQuery) LogQuery(_ ...slog.Attr) {}
 type slogQuery struct{ logger *slog.Logger }
 
 func (s *slogQuery) LogQuery(attrs ...slog.Attr) {
-	s.logger.LogAttrs(nil, slog.LevelInfo, "query", attrs...)
+	s.logger.LogAttrs(context.Background(), slog.LevelInfo, "query", attrs...)
 }
