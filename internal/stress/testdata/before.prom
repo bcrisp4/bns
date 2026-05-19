@@ -1,0 +1,27 @@
+# HELP bns_queries_total Queries by outcome and qtype.
+# TYPE bns_queries_total counter
+bns_queries_total{outcome="forwarded",qtype="A"} 100
+bns_queries_total{outcome="blocked",qtype="A"} 10
+bns_queries_total{outcome="nxdomain",qtype="A"} 2
+bns_queries_total{outcome="error",qtype="A"} 0
+# HELP bns_upstream_queries_total Upstream queries.
+# TYPE bns_upstream_queries_total counter
+bns_upstream_queries_total 95
+# HELP bns_coalesced_queries_total Coalesced queries piggybacked on in-flight upstream call.
+# TYPE bns_coalesced_queries_total counter
+bns_coalesced_queries_total 5
+# HELP bns_cache_evictions_total LRU evictions.
+# TYPE bns_cache_evictions_total counter
+bns_cache_evictions_total 0
+# HELP bns_panics_total Panics recovered in the resolver chain.
+# TYPE bns_panics_total counter
+bns_panics_total 0
+# HELP bns_query_duration_seconds Per-query duration.
+# TYPE bns_query_duration_seconds histogram
+bns_query_duration_seconds_bucket{le="0.0005"} 80
+bns_query_duration_seconds_bucket{le="0.001"} 100
+bns_query_duration_seconds_bucket{le="0.002"} 110
+bns_query_duration_seconds_bucket{le="0.005"} 112
+bns_query_duration_seconds_bucket{le="+Inf"} 112
+bns_query_duration_seconds_sum 0.05
+bns_query_duration_seconds_count 112
