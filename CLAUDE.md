@@ -135,6 +135,7 @@ Import path is `codeberg.org/miekg/dns` (NO `/v2` suffix despite being v2). Fiel
 - `ResponseWriter` has NO `WriteMsg`; use `m.WriteTo(w)` or `m.Pack()` + `io.Copy(w, m)`.
 - `Msg.Copy()` shallow on RR slices. For pool-safe deep copies use `cache.CloneMsg` which clones each RR via `rr.Clone()`.
 - TC=1 truncation does NOT auto-retry — caller dials TCP explicit (see `internal/upstream/udp_client.go`).
+- **RR construction shape changed.** Header is `dns.Header` (not `dns.RR_Header`), TTL is uppercase (no `Ttl`), no `Rrtype` field on Header. `dns.A`/`AAAA`/`NS`/`SOA` embed `rdata.X` sub-struct: `dns.A{Hdr: dns.Header{...}, A: rdata.A{Addr: netip.MustParseAddr("1.2.3.4")}}`. Field accessors work via promotion (`a.Hdr.TTL`, `ns.Ns`) but construction needs the sub-struct.
 
 Vendored offline reference: `/home/ben.guest/vendor/miekg-dns-v2/`.
 
@@ -155,5 +156,20 @@ Vendored offline reference: `/home/ben.guest/vendor/miekg-dns-v2/`.
 ## Gotchas
 
 - **Port 5353 is mDNS.** avahi-daemon / systemd-resolved listens on UDP/5353; bind there give `address already in use` on UDP only (TCP bind succeeds, mask cause). Use 5354 or other free port.
-- **`serve` cobra flags minimal** — only `--config`, `--listen.udp`, `--listen.tcp`, `--upstream`. Everything else (log level, query log, cache capacity) go via env (`BNS_*`, `__` for nesting) or YAML config.
+- **`serve` cobra flags minimal** — `--config/-c`, `--listen.udp`, `--listen.tcp`, `--upstream`, `--pprof`. Everything else (log level, query log, cache capacity, blocklist sources) go via env (`BNS_*`, `__` for nesting) or YAML. Note: env vars cannot index slice config (see viper gotcha below).
+- **viper `AutomaticEnv` does NOT index slices via env vars.** `BNS_BLOCKLISTS__SOURCES__0__PATH` is ignored — viper never enumerates env keys; it only checks env on `Get("key.path")` calls, and slice unmarshal does not iterate indexed env. Slice config (blocklists.sources, upstreams) must come from YAML (`-c file.yaml`) or a CLI flag.
+- **Manual smoke leaves bns on `:9090`.** Background-launched bns from a manual test isn't killed when the shell command ends. Check `ss -ltnp | grep :9090` and kill before re-running another bns.
 - **Outcome label divergence from spec**: `bns_queries_total{outcome}` ∈ `{blocked, nxdomain, forwarded, error}` — NOT spec's `{hit, miss, blocked, error}`. Cache hit/miss not propagated; derive cache hit rate from `bns_upstream_queries_total` vs `bns_queries_total`.
+
+## Stress harness
+
+`cmd/bns-stress` orchestrates `mockupstream` + `bns serve` + dnspyre (imported as library). One run produces `dist/stress/<RFC3339>/{report.md,*.pprof,*.prom}`.
+
+```
+make build-stress
+./bin/bns-stress --scenario mixed --duration 60s --concurrency 50 \
+  --blocklist /home/ben.guest/vendor/hagezi-dns-blocklists/domains/pro.txt \
+  --max-io-errors 200
+```
+
+Spec: `docs/specs/2026-05-19-bns-dnspyre-stress-test-design.md`. Note: dnspyre's `@<path>` query-list syntax is kingpin CLI sugar — library callers (i.e. orchestrator) must expand themselves. `--max-io-errors` absorbs the dnspyre tail-cancellation artefact in short runs.
