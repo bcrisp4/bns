@@ -23,7 +23,7 @@ func TestCoalesce_CollapsesIdenticalInFlight(t *testing.T) {
 		dnsutil.SetReply(resp, req)
 		return resp, nil
 	})
-	r := coalesce.New(next)
+	r := coalesce.New(next, nil)
 
 	req := dns.NewMsg("example.com.", dns.TypeA)
 
@@ -50,7 +50,7 @@ func TestCoalesce_ReturnsDeepCopies(t *testing.T) {
 		resp.Answer = []dns.RR{rr}
 		return resp, nil
 	})
-	r := coalesce.New(next)
+	r := coalesce.New(next, nil)
 
 	req := dns.NewMsg("example.com.", dns.TypeA)
 	a, _ := r.Resolve(context.Background(), req)

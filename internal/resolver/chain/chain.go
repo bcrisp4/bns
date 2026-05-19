@@ -35,7 +35,7 @@ type Deps struct {
 // Outermost is metrics; innermost is forward.
 func Build(d Deps) resolver.Resolver {
 	r := forward.New(d.Upstream)
-	r = coalesce.New(r)
+	r = coalesce.New(r, d.Metrics)
 	r = cachestage.New(r, d.Cache, d.CacheCfg)
 	r = blockstage.New(r, d.Blocklist)
 	r = qlog.New(r, d.QueryLog)
