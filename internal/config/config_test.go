@@ -26,4 +26,8 @@ func TestDefaultsFillEverything(t *testing.T) {
 	require.False(t, cfg.Logging.QueryLog.Enabled)
 	require.Equal(t, 5*time.Second, cfg.ShutdownTimeout)
 	require.Equal(t, 3*time.Second, cfg.StartupProbeTimeout)
+
+	require.Nil(t, cfg.Upstreams)
+	require.Empty(t, cfg.Blocklists.Sources)
+	require.Equal(t, time.Duration(0), cfg.Cache.MinTTL)
 }
