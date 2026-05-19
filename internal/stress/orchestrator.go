@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"codeberg.org/miekg/dns"
 	"github.com/tantalor93/dnspyre/v3/pkg/reporter"
 )
 
@@ -44,6 +46,41 @@ func WaitForReady(ctx context.Context, baseURL string, interval time.Duration) e
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("readyz not OK before deadline: %w", ctx.Err())
+		case <-t.C:
+		}
+	}
+}
+
+// WaitForDNSReady sends probe DNS queries to target (host:port) until
+// consecutive successes confirm the server is actually handling traffic,
+// or ctx is cancelled. This catches the brief window between /readyz
+// returning 200 (HTTP listener up) and the DNS server being fully stable.
+func WaitForDNSReady(ctx context.Context, target string, interval time.Duration, needed int) error {
+	c := dns.NewClient()
+	c.Transport.ReadTimeout = 1 * time.Second
+	c.Transport.WriteTimeout = 1 * time.Second
+	host, _, err := net.SplitHostPort(target)
+	if err != nil {
+		return fmt.Errorf("parse target %q: %w", target, err)
+	}
+	probe := dns.NewMsg(host+".", dns.TypeA)
+
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	ok := 0
+	for {
+		_, _, err := c.Exchange(ctx, probe, "udp", target)
+		if err == nil {
+			ok++
+			if ok >= needed {
+				return nil
+			}
+		} else {
+			ok = 0
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("dns not ready before deadline: %w", ctx.Err())
 		case <-t.C:
 		}
 	}
@@ -131,6 +168,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 			"BNS_LOGGING__FORMAT":             "json",
 			"BNS_LOGGING__QUERY_LOG__ENABLED": "false",
 			"BNS_CACHE__CAPACITY":             "10000",
+			"BNS_ADMIN__LISTEN":               cfg.Admin,
 		})
 		if cfg.BlocklistPath != "" {
 			bnsEnv = append(bnsEnv,
@@ -158,6 +196,13 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	defer readyCancel()
 	if err := WaitForReady(readyCtx, baseURL, 50*time.Millisecond); err != nil {
 		return Result{}, fmt.Errorf("bns not ready: %w", err)
+	}
+	// HTTP /readyz is up, but wait for the DNS server to be stable before
+	// benchmarking — a handful of consecutive successes eliminates startup jitter.
+	dnsCtx, dnsCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dnsCancel()
+	if err := WaitForDNSReady(dnsCtx, cfg.Target, 20*time.Millisecond, 3); err != nil {
+		return Result{}, fmt.Errorf("dns not ready: %w", err)
 	}
 
 	httpClient := &http.Client{Timeout: 10 * time.Second}
@@ -286,7 +331,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		_ = os.WriteFile(filepath.Join(cfg.OutDir, "config.json"), configJSON, 0o644)
 	}
 
-	if res.IOErrors > 0 || res.IDMismatches > 0 {
+	if res.IOErrors > cfg.MaxIOErrors || res.IDMismatches > 0 {
 		_ = os.WriteFile(filepath.Join(cfg.OutDir, "FAILED"),
 			[]byte(fmt.Sprintf("io_errors=%d id_mismatches=%d", res.IOErrors, res.IDMismatches)),
 			0o644)

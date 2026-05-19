@@ -69,6 +69,10 @@ func TestStress_MiniRun(t *testing.T) {
 	blocklist := filepath.Join(outDir, "blocklist.txt")
 	require.NoError(t, os.WriteFile(blocklist, []byte("blocked.test\n"), 0o644))
 	cfg.BlocklistPath = blocklist
+	// dnspyre counts context-cancelled in-flight queries at end of duration
+	// window as IOErrors. In a short 2s smoke run a handful are expected;
+	// tolerate up to concurrency count × 2 to avoid flakiness.
+	cfg.MaxIOErrors = int64(cfg.Concurrency) * 2
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

@@ -50,6 +50,13 @@ type Config struct {
 
 	// PprofHeap requests a heap snapshot at end of run.
 	PprofHeap bool
+
+	// MaxIOErrors is the maximum number of IO errors tolerated before the
+	// run is declared a correctness failure. Defaults to 0 (zero tolerance).
+	// Set to a small positive value in short integration tests to absorb the
+	// handful of context-cancelled queries that dnspyre records at the end of
+	// its duration window.
+	MaxIOErrors int64
 }
 
 // Defaults returns a Config populated with the orchestrator's documented
