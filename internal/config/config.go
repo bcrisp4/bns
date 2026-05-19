@@ -52,6 +52,7 @@ type BlocklistSource struct {
 // Admin configures the HTTP server hosting /metrics, /healthz, /readyz.
 type Admin struct {
 	Listen string `mapstructure:"listen"`
+	Pprof  bool   `mapstructure:"pprof"`
 }
 
 // Logging configures structured logging and query logging.

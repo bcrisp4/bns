@@ -49,6 +49,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().String("listen.udp", "", "UDP listen address (overrides config)")
 	cmd.Flags().String("listen.tcp", "", "TCP listen address (overrides config)")
 	cmd.Flags().StringSlice("upstream", nil, "Upstream addr (repeatable)")
+	cmd.Flags().Bool("pprof", false, "Expose /debug/pprof endpoints on the admin listener (default off)")
 	return cmd
 }
 
@@ -57,6 +58,9 @@ func bindServeFlags(v *viper.Viper, c *cobra.Command) error {
 		return err
 	}
 	if err := v.BindPFlag("listen.tcp", c.Flag("listen.tcp")); err != nil {
+		return err
+	}
+	if err := v.BindPFlag("admin.pprof", c.Flag("pprof")); err != nil {
 		return err
 	}
 	if c.Flag("upstream").Changed {
@@ -135,7 +139,11 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("bind admin %s: %w", cfg.Admin.Listen, err)
 	}
-	adminSrv := admin.New(adminLn, reg, rdy)
+	var adminOpts []admin.Option
+	if cfg.Admin.Pprof {
+		adminOpts = append(adminOpts, admin.WithPprof())
+	}
+	adminSrv := admin.New(adminLn, reg, rdy, adminOpts...)
 
 	if err := warmupProbe(ctx, pool, cfg.StartupProbeTimeout); err != nil {
 		logger.Warn("startup upstream probe failed", "err", err)
