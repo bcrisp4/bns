@@ -29,6 +29,7 @@ func main() {
 	flag.StringVar(&cfg.OutDir, "out", cfg.OutDir, "Per-run output dir (empty = dist/stress/<ts>/)")
 	flag.DurationVar(&cfg.PprofCPU, "pprof-cpu", cfg.PprofCPU, "CPU profile duration (0 = disabled)")
 	flag.BoolVar(&cfg.PprofHeap, "pprof-heap", cfg.PprofHeap, "Capture heap profile at end of run")
+	flag.Int64Var(&cfg.MaxIOErrors, "max-io-errors", cfg.MaxIOErrors, "IO errors tolerated before FAILED (default 0; raise for short smoke runs)")
 	flag.Parse()
 	cfg.Concurrency = uint32(*concurrency)
 
