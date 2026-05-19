@@ -18,5 +18,6 @@ func newRootCmd() *cobra.Command {
 	cmd.Version = buildinfo.Version
 	cmd.SetVersionTemplate("bns version {{.Version}}\n")
 
+	cmd.AddCommand(newServeCmd())
 	return cmd
 }
