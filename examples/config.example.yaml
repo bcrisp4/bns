@@ -1,0 +1,35 @@
+listen:
+  udp: ":53"
+  tcp: ":53"
+  query_timeout: 5s
+
+upstreams:
+  - addr: "1.1.1.1:53"
+    timeout: 2s
+  - addr: "9.9.9.9:53"
+    timeout: 2s
+
+cache:
+  capacity: 10000
+  min_ttl: 0s
+  max_ttl: 86400s
+  negative_ttl_max: 900s
+  serve_stale_on_failure_ttl: 5s
+
+blocklists:
+  sources:
+    - type: file
+      path: ./examples/sample-blocklist.txt
+      format: auto
+
+admin:
+  listen: ":9090"
+
+logging:
+  level: info
+  format: json
+  query_log:
+    enabled: false
+
+shutdown_timeout: 5s
+startup_probe_timeout: 3s

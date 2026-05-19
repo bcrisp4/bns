@@ -1,0 +1,10 @@
+# Tiny sample blocklist for first-run testing.
+# Mix of plain-domain and hosts-style entries.
+
+# Plain:
+ads.example
+tracker.example
+
+# Hosts-style:
+0.0.0.0 doubleclick.example
+127.0.0.1 google-analytics.example
