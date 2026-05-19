@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -45,10 +44,7 @@ func Load(opts LoadOptions) (Config, error) {
 	if opts.ConfigPath != "" {
 		v.SetConfigFile(opts.ConfigPath)
 		if err := v.ReadInConfig(); err != nil {
-			var notFound viper.ConfigFileNotFoundError
-			if !errors.As(err, &notFound) {
-				return Config{}, fmt.Errorf("read config %q: %w", opts.ConfigPath, err)
-			}
+			return Config{}, fmt.Errorf("read config %q: %w", opts.ConfigPath, err)
 		}
 	}
 
