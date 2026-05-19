@@ -32,3 +32,33 @@ Tracked follow-ups. Not bugs; not currently blocking. Promote to a spec/plan whe
 - **`bns-stress diff <old> <new>` subcommand.**
   No regression-gate utility today — comparison is eyeball-driven. Add
   once enough baseline reports exist to make it meaningful.
+
+## BNS CLI surface
+
+- **Add `--blocklist` flag to `bns serve` (repeatable).**
+  Today blocklists must come from YAML config (viper's `AutomaticEnv`
+  cannot index slices). The stress orchestrator works around this by
+  writing a temp YAML. A repeatable `--blocklist <path>` flag would
+  remove that workaround and make ad-hoc invocations less awkward.
+  Build the slice in `runServe` from the flag values, appended to
+  `cfg.Blocklists.Sources` after viper unmarshal.
+
+- **Audit `internal/config/config.go` for fields that should also be
+  CLI flags.** Today only `--listen.udp`, `--listen.tcp`, `--upstream`,
+  `--pprof`, `-c` exist on `serve`. Other config keys (`cache.capacity`,
+  `cache.max_ttl`, `cache.negative_ttl_max`, `logging.level`,
+  `logging.query_log.enabled`, `admin.listen`, `shutdown_timeout`,
+  `startup_probe_timeout`) require either YAML or `BNS_*` env vars.
+  Per project preference: expose everything as a flag where it
+  makes sense, with env + YAML still available as fallbacks (precedence
+  is already `flag > env > YAML > defaults`). One pass through the
+  config struct, one binder block. Slice fields (`upstreams`,
+  `blocklists.sources`) need bespoke handling per above.
+
+- **Resolve scenario `@<path>` entries against a known root.**
+  `internal/stress/orchestrator.go:expandFileRefs` opens the path as
+  given. Today that is implicitly relative to `bns-stress`'s cwd, which
+  works because `make stress` runs from the repo root. A user
+  invoking `./bin/bns-stress` from anywhere else gets a confusing
+  open error. Either resolve relative to the binary or embed the
+  queries with `embed.FS` (and let scenarios choose).
