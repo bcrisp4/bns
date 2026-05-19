@@ -16,5 +16,5 @@ func TestRootVersionFlag(t *testing.T) {
 
 	err := cmd.Execute()
 	require.NoError(t, err)
-	require.Contains(t, out.String(), "bns version")
+	require.Equal(t, "bns version dev\n", out.String())
 }

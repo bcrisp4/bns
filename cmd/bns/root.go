@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/bcrisp4/bns/internal/buildinfo"
 	"github.com/spf13/cobra"
 )
@@ -18,7 +16,7 @@ func newRootCmd() *cobra.Command {
 
 	// Custom version output so the test (and humans) get a stable shape.
 	cmd.Version = buildinfo.Version
-	cmd.SetVersionTemplate(fmt.Sprintf("bns version %s\n", buildinfo.Version))
+	cmd.SetVersionTemplate("bns version {{.Version}}\n")
 
 	return cmd
 }
