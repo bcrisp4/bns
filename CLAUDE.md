@@ -10,7 +10,7 @@ Module: `github.com/bcrisp4/bns`. Go 1.26.
 
 ## Status
 
-Greenfield. `cmd/` is empty, no packages yet, no tests yet. Treat the seed prompt as authoritative spec.
+MVP shipped on `feat/mvp` (47 commits, not yet merged to `main`). All 17 internal packages exist; full chain works end-to-end; tests race-clean. See `docs/specs/2026-05-19-bns-mvp-design.md` and `docs/plans/2026-05-19-bns-mvp-implementation.md`.
 
 ## Tech stack — non-obvious
 
@@ -25,7 +25,7 @@ Greenfield. `cmd/` is empty, no packages yet, no tests yet. Treat the seed promp
 These come from the spec; preserve them when designing:
 
 - **Two listeners**: UDP and TCP, same handler logic. Forward protocol pluggable — DoH/DoT/DoQ are future work but the forwarder interface should not preclude them.
-- **Blocklist matching** is exact + subdomain wildcard. `ads.com` blocks `ads.com` and `*.ads.com`. Must scale to ~100K entries.
+- **Blocklist matching** is exact + subdomain wildcard. `ads.com` blocks `ads.com` and `*.ads.com`. Capacity target: up to 1M entries (hagezi `pro.txt` ~471K today).
 - **Cache** is in-memory, bounded, TTL-aware, with eviction when full. Negative caching supported. Not persistent across restarts. Capacity configurable at runtime.
 - **Upstream dedup** via `singleflight` to coalesce concurrent identical queries.
 - **Thread-safety required everywhere** — listeners, cache, blocklist, metrics all hit concurrently.
@@ -47,3 +47,42 @@ Target: a few thousand QPS on Raspberry Pi-class hardware. NOT high-scale.
 - Designs/specs belong in `docs/specs` and get committed.
 - Implementation plans belong in `docs/plans` and get committed.
 - Build binaries to `bin/` (gitignored). Example: `go build -o bin/bns ./cmd/bns`.
+
+## miekg/dns v2 — API cheat sheet
+
+Import path is `codeberg.org/miekg/dns` (NO `/v2` suffix despite being v2). Field/function differences vs v1 that bit us:
+
+- `Msg.ID` (uppercase), not `Id`.
+- Build a request via `dns.NewMsg(name, qtype)`. No `req.SetQuestion(...)`.
+- Wire a reply via `dnsutil.SetReply(resp, req)` from `codeberg.org/miekg/dns/dnsutil`. No `resp.SetReply(req)`.
+- Parse RR text via `dns.New(s)`, not `dns.NewRR(s)`.
+- `Msg.Question` is `[]dns.RR` (not `[]dns.Question`). Extract qname via `q.Header().Name`.
+- Header has no `Rrtype`. Get qtype string via `dns.TypeToString[dns.RRToType(rr)]`.
+- `Msg.Rcode` is uint16; cast constants when comparing: `uint16(dns.RcodeNameError)`.
+- `Client`: `dns.NewClient()` + `c.Transport.ReadTimeout = ...`; network is an arg to `Exchange(ctx, m, network, addr)`.
+- `Handler.ServeDNS(ctx, w, r)` — ctx-first.
+- `Server.Shutdown(ctx)` returns void. Server races with init() — wait on `NotifyStartedFunc` (see `internal/server/server.go`).
+- `ResponseWriter` has NO `WriteMsg`; use `m.WriteTo(w)` or `m.Pack()` + `io.Copy(w, m)`.
+- `Msg.Copy()` is shallow on RR slices. For pool-safe deep copies use `cache.CloneMsg` which clones each RR via `rr.Clone()`.
+- TC=1 truncation does NOT auto-retry — caller dials TCP explicitly (see `internal/upstream/udp_client.go`).
+
+Vendored offline reference: `/home/ben.guest/vendor/miekg-dns-v2/`.
+
+## Local vendored references
+
+- `/home/ben.guest/vendor/miekg-dns-v2/` — codeberg miekg/dns v2 source. Read for API confirmation before guessing.
+- `/home/ben.guest/vendor/hagezi-dns-blocklists/` — hagezi lists. Canonical format is `domains/` (newline-delimited FQDNs, `#` header comments only, punycode IDNs). Files are large — never `Read` the whole thing; use `head`/`wc -l`/`grep`.
+
+## Build and test
+
+- `make build` — `bin/bns` static binary
+- `make test` — go test ./...
+- `make race` — race detector (preferred — concurrency is load-bearing)
+- `make vet` — go vet
+- `make lint` — golangci-lint (NOT installed locally; CI only)
+- `make tidy` — go mod tidy
+
+## Known MVP divergences from spec
+
+- Metric `bns_queries_total` outcome label set is `{blocked, nxdomain, forwarded, error}` — NOT spec's `{hit, miss, blocked, error}`. Cache hit/miss is not propagated to the outer metric stage; derive cache hit rate from `bns_upstream_queries_total` vs `bns_queries_total`.
+- `serve` cobra subcommand only exposes flags `--config`, `--listen.udp`, `--listen.tcp`, `--upstream`. Everything else (log level, query log, cache capacity, etc.) configured via env (`BNS_*`, `__` for nesting) or YAML.
