@@ -1,0 +1,7 @@
+{
+  "enabledPlugins": {
+    "cc-skills-golang@samber": true
+  },
+  "skillListingBudgetFraction": 0.05,
+  "skillListingMaxDescChars": 8192
+}
