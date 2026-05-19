@@ -34,3 +34,6 @@ go.work.sum
 
 # Build output
 dist/
+
+# Caveman-compress backups of memory files (kept locally, not shared)
+*.original.md
