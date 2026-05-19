@@ -61,7 +61,6 @@ func Spawn(t *testing.T, h Handler) string {
 	go func() { _ = udpSrv.ListenAndServe() }()
 	go func() { _ = tcpSrv.ListenAndServe() }()
 
-	// Wait for both servers to be fully initialised before returning.
 	<-udpReady
 	<-tcpReady
 
