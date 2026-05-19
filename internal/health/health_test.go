@@ -31,7 +31,8 @@ func TestReadiness_StartsNotReady(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, _ := http.Get(srv.URL + "/readyz")
+	resp, err := http.Get(srv.URL + "/readyz")
+	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
 }
@@ -47,7 +48,8 @@ func TestReadiness_AllChecksReadyServes200(t *testing.T) {
 	r.SetListenersReady(true)
 	r.SetUpstreamReady(true)
 
-	resp, _ := http.Get(srv.URL + "/readyz")
+	resp, err := http.Get(srv.URL + "/readyz")
+	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 }
