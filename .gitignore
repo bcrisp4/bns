@@ -31,3 +31,6 @@ go.work.sum
 *.swp
 *.swo
 .DS_Store
+
+# Build output
+dist/
