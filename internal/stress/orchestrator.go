@@ -176,21 +176,16 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 			"BNS_ADMIN__LISTEN":               cfg.Admin,
 		})
 
-		// Viper's AutomaticEnv does not handle slice indexing via env vars, so
-		// blocklists.sources must be expressed in YAML. Write a temp config and
-		// pass -c. Scalar overrides still flow through env or CLI flags.
-		bnsConfigPath, err := writeBNSConfig(cfg.OutDir, cfg.BlocklistPath)
-		if err != nil {
-			return Result{}, fmt.Errorf("write bns config: %w", err)
-		}
-
-		bnsCmd = exec.CommandContext(ctx, cfg.BNSBin, "serve",
-			"-c", bnsConfigPath,
+		bnsArgs := []string{"serve",
 			"--listen.udp", cfg.Target,
 			"--listen.tcp", cfg.Target,
 			"--upstream", defaultMockAddr,
 			"--pprof",
-		)
+		}
+		if cfg.BlocklistPath != "" {
+			bnsArgs = append(bnsArgs, "--blocklist", cfg.BlocklistPath)
+		}
+		bnsCmd = exec.CommandContext(ctx, cfg.BNSBin, bnsArgs...)
 		bnsCmd.Env = append(os.Environ(), bnsEnv...)
 		bnsCmd.Stdout = bnsLog
 		bnsCmd.Stderr = bnsLog
@@ -403,10 +398,6 @@ func capturePprof(ctx context.Context, c *http.Client, url, outPath string) erro
 	return err
 }
 
-// writeBNSConfig generates a minimal YAML config file in outDir, returning
-// its path. Viper does not handle slice indexing via env vars, so blocklist
-// sources must be supplied via YAML. The file is named bns-config.yaml so
-// it is archived alongside the other per-run artefacts.
 // expandFileRefs replaces any `@<path>` entry in b.Queries with the lines
 // of that file. The `@` prefix is kingpin v2 (dnspyre's CLI parser) sugar;
 // when calling the dnspyre library directly we have to do the expansion
@@ -440,19 +431,6 @@ func expandFileRefs(b *dnsbench.Benchmark) error {
 	}
 	b.Queries = out
 	return nil
-}
-
-func writeBNSConfig(outDir, blocklistPath string) (string, error) {
-	path := filepath.Join(outDir, "bns-config.yaml")
-	var sb strings.Builder
-	if blocklistPath != "" {
-		sb.WriteString("blocklists:\n  sources:\n")
-		fmt.Fprintf(&sb, "    - type: file\n      path: %q\n", blocklistPath)
-	}
-	if err := os.WriteFile(path, []byte(sb.String()), 0o644); err != nil {
-		return "", err
-	}
-	return path, nil
 }
 
 func gitSha() string {

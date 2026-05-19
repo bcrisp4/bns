@@ -46,32 +46,73 @@ func newServeCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Path to YAML config file")
-	cmd.Flags().String("listen.udp", "", "UDP listen address (overrides config)")
-	cmd.Flags().String("listen.tcp", "", "TCP listen address (overrides config)")
-	cmd.Flags().StringSlice("upstream", nil, "Upstream addr (repeatable)")
-	cmd.Flags().Bool("pprof", false, "Expose /debug/pprof endpoints on the admin listener (default off)")
+	cmd.Flags().String("listen.udp", "", `UDP listen address host:port (default ":53")`)
+	cmd.Flags().String("listen.tcp", "", `TCP listen address host:port (default ":53")`)
+	cmd.Flags().Duration("listen.query-timeout", 0, "Per-query handling timeout (default 5s)")
+	cmd.Flags().StringSlice("upstream", nil, "Upstream resolver addr host:port; repeat for multiple (no default; required)")
+	cmd.Flags().StringSlice("blocklist", nil, "Blocklist file path; repeat for multiple (default none)")
+	cmd.Flags().Int("cache.capacity", 0, "Maximum cached DNS responses (default 10000)")
+	cmd.Flags().Duration("cache.min-ttl", 0, "Floor applied to cached entry TTL (default 0s)")
+	cmd.Flags().Duration("cache.max-ttl", 0, "Ceiling applied to cached entry TTL (default 24h)")
+	cmd.Flags().Duration("cache.negative-ttl-max", 0, "Ceiling applied to negative-cache TTL derived from SOA (default 15m)")
+	cmd.Flags().String("admin.listen", "", `Admin HTTP listen address host:port for /metrics, /healthz, /readyz (default ":9090")`)
+	cmd.Flags().Bool("pprof", false, "Expose /debug/pprof endpoints on the admin listener (default false)")
+	cmd.Flags().String("logging.level", "", `Log level: debug|info|warn|error (default "info")`)
+	cmd.Flags().String("logging.format", "", `Log format: json|text (default "json")`)
+	cmd.Flags().Bool("logging.query-log", false, "Emit one JSON log line per DNS query (default false)")
+	cmd.Flags().Duration("shutdown-timeout", 0, "Grace period for in-flight queries on shutdown (default 5s)")
+	cmd.Flags().Duration("startup-probe-timeout", 0, "Deadline for the upstream warmup probe before marking ready (default 3s)")
 	return cmd
 }
 
 func bindServeFlags(v *viper.Viper, c *cobra.Command) error {
-	if err := v.BindPFlag("listen.udp", c.Flag("listen.udp")); err != nil {
-		return err
+	binds := []struct {
+		viperKey string
+		flagName string
+	}{
+		{"listen.udp", "listen.udp"},
+		{"listen.tcp", "listen.tcp"},
+		{"listen.query_timeout", "listen.query-timeout"},
+		{"cache.capacity", "cache.capacity"},
+		{"cache.min_ttl", "cache.min-ttl"},
+		{"cache.max_ttl", "cache.max-ttl"},
+		{"cache.negative_ttl_max", "cache.negative-ttl-max"},
+		{"admin.listen", "admin.listen"},
+		{"admin.pprof", "pprof"},
+		{"logging.level", "logging.level"},
+		{"logging.format", "logging.format"},
+		{"logging.query_log.enabled", "logging.query-log"},
+		{"shutdown_timeout", "shutdown-timeout"},
+		{"startup_probe_timeout", "startup-probe-timeout"},
 	}
-	if err := v.BindPFlag("listen.tcp", c.Flag("listen.tcp")); err != nil {
-		return err
-	}
-	if err := v.BindPFlag("admin.pprof", c.Flag("pprof")); err != nil {
-		return err
-	}
-	if c.Flag("upstream").Changed {
-		ups, _ := c.Flags().GetStringSlice("upstream")
-		out := make([]map[string]any, 0, len(ups))
-		for _, addr := range ups {
-			out = append(out, map[string]any{"addr": addr, "timeout": "2s"})
+	for _, b := range binds {
+		if err := v.BindPFlag(b.viperKey, c.Flag(b.flagName)); err != nil {
+			return err
 		}
-		v.Set("upstreams", out)
 	}
+
+	// Slice flags bypass BindPFlag — viper cannot expand a scalar StringSlice
+	// flag into a nested []struct shape. Build the payload manually and v.Set,
+	// which has higher precedence than YAML/env.
+	setSliceFlag(v, c, "upstream", "upstreams", func(addr string) map[string]any {
+		return map[string]any{"addr": addr, "timeout": "2s"}
+	})
+	setSliceFlag(v, c, "blocklist", "blocklists.sources", func(path string) map[string]any {
+		return map[string]any{"type": "file", "path": path}
+	})
 	return nil
+}
+
+func setSliceFlag(v *viper.Viper, c *cobra.Command, flagName, viperKey string, build func(string) map[string]any) {
+	if !c.Flag(flagName).Changed {
+		return
+	}
+	vals, _ := c.Flags().GetStringSlice(flagName)
+	out := make([]map[string]any, 0, len(vals))
+	for _, x := range vals {
+		out = append(out, build(x))
+	}
+	v.Set(viperKey, out)
 }
 
 func runServe(ctx context.Context, cfg config.Config) error {
