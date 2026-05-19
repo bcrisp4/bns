@@ -60,7 +60,7 @@ internal/server/                  // UDP + TCP listeners (codeberg miekg/dns)
 internal/resolver/                // Resolver interface + chain builder
 internal/resolver/blocklist/      // blocklist stage
 internal/resolver/cache/          // cache stage
-internal/resolver/singleflight/   // dedup stage
+internal/resolver/coalesce/       // dedup stage (today backed by singleflight)
 internal/resolver/forward/        // upstream forwarder stage (last in chain)
 internal/blocklist/               // Source interface, FileSource, Matcher
 internal/cache/                   // LRU cache with TTL
@@ -92,7 +92,7 @@ exist so the obvious extensions can be added without touching consumers.
 | Metrics       | `github.com/prometheus/client_golang`     | `promhttp.Handler()` for `/metrics`.                                                               |
 | CLI           | `github.com/spf13/cobra`                  | Single root command.                                                                               |
 | Config        | `github.com/spf13/viper`                  | YAML + env (`BNS_` prefix) + flags.                                                                |
-| Singleflight  | `golang.org/x/sync/singleflight`          | Standard.                                                                                          |
+| Coalescing    | `golang.org/x/sync/singleflight`          | Implementation detail of `internal/resolver/coalesce`; not exposed in API.                         |
 | Logging       | stdlib `log/slog`                         | JSON handler.                                                                                      |
 | Test asserts  | `github.com/stretchr/testify/require`     | Already-ubiquitous, keeps test code tight.                                                         |
 
@@ -167,15 +167,15 @@ dependencies. A stage either short-circuits with a response or delegates to
 `next`. Chain order, outermost first:
 
 ```
-metrics → query-log → blocklist → cache → singleflight → forward
+metrics → query-log → blocklist → cache → coalesce → forward
 ```
 
 Construction is procedural in `cmd/bns/main.go`:
 
 ```go
 forward := forward.New(pool)
-sf      := sfresolver.New(forward)
-ch      := cache.New(sf, lru)
+co      := coalesce.New(forward)
+ch      := cache.New(co, lru)
 bl      := blocklist.New(ch, matcherPtr)
 ql      := qlog.New(bl, queryLogger)
 m       := metrics.New(ql, registry)
@@ -230,12 +230,18 @@ TTL computation at store time:
 Capacity is bounded by entry count (`cache.capacity`). LRU eviction on
 insert when full. Expired entries are evicted lazily on lookup.
 
-### 5.6 `singleflight`
+### 5.6 `coalesce`
 
-Wraps `golang.org/x/sync/singleflight`. Key identical to the cache key.
-Collapses concurrent identical misses into one upstream call; all callers
-receive deep-copies of the shared response (again — pool ownership).
-Increments `bns_singleflight_collapsed_total` for each piggyback caller.
+Coalesces concurrent identical in-flight queries into a single upstream
+call. Today this is implemented over `golang.org/x/sync/singleflight`,
+but the package name and metric names hide that detail so the
+implementation can change (e.g. to a custom waitgroup map) without API
+or dashboard churn.
+
+Key is identical to the cache key. All piggyback callers receive
+deep-copies of the shared response (pool ownership rules from §5.5
+apply). Increments `bns_coalesced_queries_total` for each piggyback
+caller (i.e. callers who did NOT initiate the upstream call).
 
 ### 5.7 `blocklist`
 
@@ -356,7 +362,7 @@ bns_cache_evictions_total                     counter
 bns_blocklist_entries                         gauge
 bns_blocklist_loaded_timestamp_seconds        gauge
 bns_blocklist_reloads_total{outcome}          counter
-bns_singleflight_collapsed_total              counter
+bns_coalesced_queries_total                   counter
 bns_panics_total                              counter
 ```
 
@@ -392,7 +398,7 @@ End-to-end path for a single query:
 1. `miekg` server reads a packet on UDP/TCP and spawns a goroutine.
 2. Goroutine calls `resolverHandler.ServeDNS(ctx, w, req)`.
 3. Handler invokes the resolver chain: `metrics → query-log → blocklist →
-   cache → singleflight → forward`.
+   cache → coalesce → forward`.
 4. Each stage either short-circuits or delegates to `next`:
    - **metrics**: starts timer, defers observation, also installs panic
      recovery.
@@ -403,8 +409,9 @@ End-to-end path for a single query:
      resp.Id=req.Id; resp.Question=req.Question`).
    - **cache**: lookup by `(qname|qtype|qclass)`. On non-expired hit,
      `dns.Copy(entry.response)`, decrement TTLs by age, return.
-   - **singleflight**: `do.Do(key, func() (interface{}, error) {
-     return next.Resolve(ctx, req) })`.
+   - **coalesce**: deduplicates concurrent identical in-flight queries
+     by `(qname|qtype|qclass)`; piggybacked callers get deep-copies of
+     the originator's response.
    - **forward**: `pool.Exchange(ctx, req)`. On `TC=1`, retry that
      upstream once over TCP.
 5. On unwind, the cache stage stores `dns.Copy(resp)` with computed
