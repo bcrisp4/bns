@@ -135,10 +135,18 @@ func (c *LRU) Get(key string) (*dns.Msg, bool) {
 // slice elements (RR pointers) are shared, so Header().TTL mutations on one
 // copy would corrupt the other. We need independent RR values.
 //
-// Exported so other packages (e.g. coalesce) can reuse the same safe copy
-// without duplicating the logic.
+// Data is intentionally cleared on the clone. dns.Msg carries a wire-format
+// cache in its Data field; Copy() propagates that stale buffer. If the caller
+// mutates any struct field (e.g. ID, TTLs) and then calls WriteTo, the library
+// skips Pack() when Data is non-empty and writes the old bytes — producing ID
+// mismatches and stale TTLs on the wire. Clearing Data forces a fresh Pack on
+// the next WriteTo call.
+//
+// Exported so other packages (e.g. coalesce, cachestage) can reuse the same
+// safe copy without duplicating the logic.
 func CloneMsg(m *dns.Msg) *dns.Msg {
 	cp := m.Copy() // copies MsgHeader and slice headers; elements still shared
+	cp.Data = nil  // clear stale wire buffer; WriteTo will re-Pack from fields
 	cp.Question = cloneRRs(m.Question)
 	cp.Answer = cloneRRs(m.Answer)
 	cp.Ns = cloneRRs(m.Ns)
