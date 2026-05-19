@@ -4,17 +4,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-BNS (Ben's Name Server) — caching DNS forwarder with ad-blocking for a small private network. Pi-hole-like. Go, single-binary, deployable on a Raspberry Pi.
+BNS (Ben's Name Server) — caching DNS forwarder with ad-blocking for a small private network. Pi-hole-like. Go 1.26, module `github.com/bcrisp4/bns`, single static binary deployable on a Raspberry Pi.
 
-Module: `github.com/bcrisp4/bns`. Go 1.26.
+MVP shipped on `feat/mvp` (not yet merged to `main`). 17 internal packages, full chain works end-to-end, tests race-clean. See `docs/specs/2026-05-19-bns-mvp-design.md` and `docs/plans/2026-05-19-bns-mvp-implementation.md`.
 
-## Status
+## Quickstart
 
-MVP shipped on `feat/mvp` (47 commits, not yet merged to `main`). All 17 internal packages exist; full chain works end-to-end; tests race-clean. See `docs/specs/2026-05-19-bns-mvp-design.md` and `docs/plans/2026-05-19-bns-mvp-implementation.md`.
+```bash
+make build
+# Bind off :53 (mDNS owns UDP/5353 on most Linux; avoid that too)
+BNS_LOGGING__QUERY_LOG__ENABLED=true BNS_LOGGING__LEVEL=debug \
+  ./bin/bns serve -c examples/config.example.yaml \
+  --listen.udp 127.0.0.1:5354 --listen.tcp 127.0.0.1:5354 \
+  --upstream 1.1.1.1:53
+```
+
+Smoke test in another terminal:
+
+```bash
+dig @127.0.0.1 -p 5354 example.com         # forwarded
+dig @127.0.0.1 -p 5354 ads.example         # NXDOMAIN (sample blocklist)
+curl http://127.0.0.1:9090/metrics | grep bns_
+```
+
+Reload blocklists in place: `pkill -HUP -f bin/bns`.
 
 ## Tech stack — non-obvious
 
-- **DNS library: `codeberg.org/miekg/dns` v2.** NOT `github.com/miekg/dns` (v1, unmaintained). The v2 API is incompatible with v1. Do not import the GitHub path. When fetching docs, use Context7 / codeberg, not the stale GH v1 docs.
+- **DNS library: `codeberg.org/miekg/dns` v2** (see API cheat sheet below). NOT `github.com/miekg/dns` (v1, unmaintained). When fetching docs, use Context7 / codeberg, not stale v1 docs.
 - Metrics: Prometheus (`/metrics`).
 - Logging: stdlib `slog`, structured, stdout/stderr.
 - CLI: `cobra`. Config: `viper` (flags + env + YAML, in that precedence).
@@ -135,7 +152,8 @@ Vendored offline reference: `/home/ben.guest/vendor/miekg-dns-v2/`.
 - `make lint` — golangci-lint (NOT installed locally; CI only)
 - `make tidy` — go mod tidy
 
-## Known MVP divergences from spec
+## Gotchas
 
-- Metric `bns_queries_total` outcome label set is `{blocked, nxdomain, forwarded, error}` — NOT spec's `{hit, miss, blocked, error}`. Cache hit/miss is not propagated to the outer metric stage; derive cache hit rate from `bns_upstream_queries_total` vs `bns_queries_total`.
-- `serve` cobra subcommand only exposes flags `--config`, `--listen.udp`, `--listen.tcp`, `--upstream`. Everything else (log level, query log, cache capacity, etc.) configured via env (`BNS_*`, `__` for nesting) or YAML.
+- **Port 5353 is mDNS.** avahi-daemon / systemd-resolved listens on UDP/5353; binding there gives `address already in use` on UDP only (TCP bind succeeds, masking the cause). Use 5354 or another free port.
+- **`serve` cobra flags are minimal** — only `--config`, `--listen.udp`, `--listen.tcp`, `--upstream`. Everything else (log level, query log, cache capacity) goes via env (`BNS_*`, `__` for nesting) or YAML config.
+- **Outcome label divergence from spec**: `bns_queries_total{outcome}` ∈ `{blocked, nxdomain, forwarded, error}` — NOT spec's `{hit, miss, blocked, error}`. Cache hit/miss not propagated; derive cache hit rate from `bns_upstream_queries_total` vs `bns_queries_total`.
