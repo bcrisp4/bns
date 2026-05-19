@@ -70,7 +70,7 @@ func (c *LRU) Store(key string, msg *dns.Msg, ttl time.Duration, negative bool) 
 	now := time.Now()
 	e := &entry{
 		key:       key,
-		response:  cloneMsg(msg), // deep-copy: caller owns the original
+		response:  CloneMsg(msg), // deep-copy: caller owns the original
 		storedAt:  now,
 		expiresAt: now.Add(ttl),
 		negative:  negative,
@@ -124,17 +124,20 @@ func (c *LRU) Get(key string) (*dns.Msg, bool) {
 
 	// Return a deep-copy with TTLs decremented by age, so callers see the
 	// remaining wire-format TTL rather than the upstream value.
-	cp := cloneMsg(e.response)
+	cp := CloneMsg(e.response)
 	age := uint32(now.Sub(e.storedAt) / time.Second)
 	decrementTTLs(cp, age)
 	return cp, true
 }
 
-// cloneMsg returns a true deep-copy of a *dns.Msg by cloning each RR via
+// CloneMsg returns a true deep-copy of a *dns.Msg by cloning each RR via
 // its Clone() method. dns.Msg.Copy() in v2 is a shallow struct copy — the
 // slice elements (RR pointers) are shared, so Header().TTL mutations on one
 // copy would corrupt the other. We need independent RR values.
-func cloneMsg(m *dns.Msg) *dns.Msg {
+//
+// Exported so other packages (e.g. coalesce) can reuse the same safe copy
+// without duplicating the logic.
+func CloneMsg(m *dns.Msg) *dns.Msg {
 	cp := m.Copy() // copies MsgHeader and slice headers; elements still shared
 	cp.Question = cloneRRs(m.Question)
 	cp.Answer = cloneRRs(m.Answer)
