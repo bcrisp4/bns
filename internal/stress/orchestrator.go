@@ -2,10 +2,19 @@ package stress
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"sort"
+	"strings"
 	"time"
+
+	"github.com/tantalor93/dnspyre/v3/pkg/reporter"
 )
 
 // AdminBaseURL returns "http://" + admin host:port. The orchestrator
@@ -56,4 +65,289 @@ func BNSEnv(scenario, defaults map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// Result is the outcome of a single Run.
+type Result struct {
+	OutDir           string
+	TotalQueries     int64
+	QPS              float64
+	P50, P95, P99    time.Duration
+	IOErrors         int64
+	IDMismatches     int64
+	Counters         map[string]int64
+	UpstreamQueries  int64
+	CoalescedQueries int64
+	CacheEvictions   int64
+	Panics           int64
+}
+
+// Run executes one stress run end-to-end. The returned Result mirrors
+// the headline numbers in report.md, suitable for printing the one-line
+// summary.
+func Run(ctx context.Context, cfg Config) (Result, error) {
+	if err := cfg.Validate(); err != nil {
+		return Result{}, err
+	}
+	scenario, ok := LookupScenario(cfg.Scenario)
+	if !ok {
+		return Result{}, fmt.Errorf("unknown scenario %q", cfg.Scenario)
+	}
+
+	if cfg.OutDir == "" {
+		cfg.OutDir = filepath.Join("dist", "stress", time.Now().UTC().Format("2006-01-02T15-04-05Z"))
+	}
+	if err := os.MkdirAll(cfg.OutDir, 0o755); err != nil {
+		return Result{}, fmt.Errorf("create out dir: %w", err)
+	}
+
+	bnsLog, err := os.Create(filepath.Join(cfg.OutDir, "bns.log"))
+	if err != nil {
+		return Result{}, err
+	}
+	defer bnsLog.Close()
+	mockLog, err := os.Create(filepath.Join(cfg.OutDir, "mockupstream.log"))
+	if err != nil {
+		return Result{}, err
+	}
+	defer mockLog.Close()
+
+	var bnsCmd, mockCmd *exec.Cmd
+	if cfg.Spawn {
+		mockAddr := "127.0.0.1:5355"
+		mockCmd = exec.CommandContext(ctx, cfg.MockBin,
+			"--listen.udp", mockAddr,
+			"--listen.tcp", mockAddr,
+		)
+		mockCmd.Stdout = mockLog
+		mockCmd.Stderr = mockLog
+		if err := mockCmd.Start(); err != nil {
+			return Result{}, fmt.Errorf("start mockupstream: %w", err)
+		}
+		defer terminate(mockCmd)
+
+		bnsEnv := BNSEnv(scenario.BNSEnv, map[string]string{
+			"BNS_LOGGING__LEVEL":              "info",
+			"BNS_LOGGING__FORMAT":             "json",
+			"BNS_LOGGING__QUERY_LOG__ENABLED": "false",
+			"BNS_CACHE__CAPACITY":             "10000",
+		})
+		if cfg.BlocklistPath != "" {
+			bnsEnv = append(bnsEnv,
+				"BNS_BLOCKLISTS__SOURCES__0__TYPE=file",
+				"BNS_BLOCKLISTS__SOURCES__0__PATH="+cfg.BlocklistPath,
+			)
+		}
+		bnsCmd = exec.CommandContext(ctx, cfg.BNSBin, "serve",
+			"--listen.udp", cfg.Target,
+			"--listen.tcp", cfg.Target,
+			"--upstream", mockAddr,
+			"--pprof",
+		)
+		bnsCmd.Env = append(os.Environ(), bnsEnv...)
+		bnsCmd.Stdout = bnsLog
+		bnsCmd.Stderr = bnsLog
+		if err := bnsCmd.Start(); err != nil {
+			return Result{}, fmt.Errorf("start bns: %w", err)
+		}
+		defer terminate(bnsCmd)
+	}
+
+	baseURL := AdminBaseURL(cfg.Admin)
+	readyCtx, readyCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer readyCancel()
+	if err := WaitForReady(readyCtx, baseURL, 50*time.Millisecond); err != nil {
+		return Result{}, fmt.Errorf("bns not ready: %w", err)
+	}
+
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+
+	before, beforeRaw, err := FetchSnapshot(httpClient, baseURL)
+	if err != nil {
+		return Result{}, fmt.Errorf("scrape before: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.OutDir, "before.prom"), beforeRaw, 0o644); err != nil {
+		return Result{}, err
+	}
+
+	pprofErr := make(chan error, 1)
+	if cfg.PprofCPU > 0 {
+		go func() {
+			pprofErr <- capturePprof(ctx, httpClient,
+				fmt.Sprintf("%s/debug/pprof/profile?seconds=%d", baseURL, int(cfg.PprofCPU.Seconds())),
+				filepath.Join(cfg.OutDir, "cpu.pprof"))
+		}()
+	} else {
+		pprofErr <- nil
+	}
+
+	start := time.Now()
+	b := scenario.Build(cfg.Target, cfg.Duration, cfg.Concurrency)
+	stdSilent(&b)
+	if cfg.RateLimit > 0 {
+		b.Rate = cfg.RateLimit
+	}
+	results, err := b.Run(ctx)
+	if err != nil {
+		return Result{}, fmt.Errorf("dnspyre run: %w", err)
+	}
+	elapsed := time.Since(start)
+
+	if err := <-pprofErr; err != nil {
+		_ = os.WriteFile(filepath.Join(cfg.OutDir, "cpu.pprof.err"), []byte(err.Error()), 0o644)
+	}
+
+	if cfg.PprofHeap {
+		if err := capturePprof(ctx, httpClient,
+			baseURL+"/debug/pprof/heap",
+			filepath.Join(cfg.OutDir, "heap.pprof")); err != nil {
+			_ = os.WriteFile(filepath.Join(cfg.OutDir, "heap.pprof.err"), []byte(err.Error()), 0o644)
+		}
+	}
+
+	after, afterRaw, err := FetchSnapshot(httpClient, baseURL)
+	if err != nil {
+		return Result{}, fmt.Errorf("scrape after: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.OutDir, "after.prom"), afterRaw, 0o644); err != nil {
+		return Result{}, err
+	}
+
+	d := Diff(before, after)
+	merged := reporter.Merge(&b, results)
+
+	jsonPath := filepath.Join(cfg.OutDir, "dnspyre-results.json")
+	if jsonFile, err := os.Create(jsonPath); err == nil {
+		bArchival := b
+		bArchival.JSON = true
+		bArchival.Silent = false
+		bArchival.Writer = jsonFile
+		_ = reporter.PrintReport(&bArchival, results, start, elapsed)
+		jsonFile.Close()
+	}
+
+	qps := float64(merged.Counters.Total) / elapsed.Seconds()
+
+	res := Result{
+		OutDir:           cfg.OutDir,
+		TotalQueries:     merged.Counters.Total,
+		QPS:              qps,
+		P50:              time.Duration(merged.Hist.ValueAtQuantile(50)),
+		P95:              time.Duration(merged.Hist.ValueAtQuantile(95)),
+		P99:              time.Duration(merged.Hist.ValueAtQuantile(99)),
+		IOErrors:         merged.Counters.IOError,
+		IDMismatches:     merged.Counters.IDmismatch,
+		Counters:         d.QueriesByOutcome,
+		UpstreamQueries:  d.UpstreamQueries,
+		CoalescedQueries: d.CoalescedQueries,
+		CacheEvictions:   d.CacheEvictions,
+		Panics:           d.Panics,
+	}
+
+	report := Render(ReportInput{
+		Scenario:         cfg.Scenario,
+		StartedAt:        start,
+		Target:           cfg.Target,
+		Admin:            cfg.Admin,
+		BNSGitSha:        gitSha(),
+		GoVersion:        runtime.Version(),
+		Host:             hostString(),
+		Duration:         cfg.Duration,
+		Concurrency:      cfg.Concurrency,
+		TotalQueries:     res.TotalQueries,
+		QPS:              res.QPS,
+		P50:              res.P50,
+		P95:              res.P95,
+		P99:              res.P99,
+		IOErrors:         res.IOErrors,
+		IDMismatches:     res.IDMismatches,
+		Counters:         res.Counters,
+		UpstreamQueries:  res.UpstreamQueries,
+		CoalescedQueries: res.CoalescedQueries,
+		CacheEvictions:   res.CacheEvictions,
+		Panics:           res.Panics,
+		PprofCPU:         "cpu.pprof",
+		PprofHeap:        "heap.pprof",
+	})
+	if err := os.WriteFile(filepath.Join(cfg.OutDir, "report.md"), []byte(report), 0o644); err != nil {
+		return res, err
+	}
+
+	configJSON, err := json.MarshalIndent(map[string]any{
+		"scenario":    cfg.Scenario,
+		"target":      cfg.Target,
+		"admin":       cfg.Admin,
+		"duration":    cfg.Duration.String(),
+		"concurrency": cfg.Concurrency,
+		"git_sha":     gitSha(),
+		"go_version":  runtime.Version(),
+	}, "", "  ")
+	if err == nil {
+		_ = os.WriteFile(filepath.Join(cfg.OutDir, "config.json"), configJSON, 0o644)
+	}
+
+	if res.IOErrors > 0 || res.IDMismatches > 0 {
+		_ = os.WriteFile(filepath.Join(cfg.OutDir, "FAILED"),
+			[]byte(fmt.Sprintf("io_errors=%d id_mismatches=%d", res.IOErrors, res.IDMismatches)),
+			0o644)
+		return res, fmt.Errorf("correctness failure: io_errors=%d id_mismatches=%d", res.IOErrors, res.IDMismatches)
+	}
+
+	return res, nil
+}
+
+// terminate sends SIGINT to cmd's process, waits up to 10s, then SIGKILL.
+func terminate(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	_ = cmd.Process.Signal(os.Interrupt)
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+		return
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+	}
+}
+
+// capturePprof streams a pprof endpoint to disk.
+func capturePprof(ctx context.Context, c *http.Client, url, outPath string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("pprof %s status %d", url, resp.StatusCode)
+	}
+	f, err := os.Create(outPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = io.Copy(f, resp.Body)
+	return err
+}
+
+func gitSha() string {
+	out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return "unknown"
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func hostString() string {
+	out, err := exec.Command("uname", "-srm").Output()
+	if err != nil {
+		return runtime.GOOS + "/" + runtime.GOARCH
+	}
+	return strings.TrimSpace(string(out))
 }
