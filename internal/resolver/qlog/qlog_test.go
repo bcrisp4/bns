@@ -23,6 +23,13 @@ func (c *captureQL) LogQuery(attrs ...slog.Attr) {
 	c.entries = append(c.entries, append([]slog.Attr(nil), attrs...))
 }
 
+func (c *captureQL) Enabled() bool { return true }
+
+type disabledQL struct{}
+
+func (disabledQL) LogQuery(_ ...slog.Attr) {}
+func (disabledQL) Enabled() bool           { return false }
+
 func TestQLog_EmitsQnameAndOutcome(t *testing.T) {
 	cap := &captureQL{}
 	next := resolver.ResolverFunc(func(_ context.Context, req *dns.Msg) (*dns.Msg, error) {
@@ -52,4 +59,57 @@ func TestQLog_EmitsQnameAndOutcome(t *testing.T) {
 	}
 	require.Equal(t, "example.com.", qname)
 	require.Equal(t, "forwarded", outcome)
+}
+
+// stubResolver returns a preallocated response so callers that exercise the
+// chain in a loop (benchmarks) and callers that need a pointer-comparable
+// terminal resolver (identity tests) can share one type.
+type stubResolver struct{ resp *dns.Msg }
+
+func (s *stubResolver) Resolve(_ context.Context, _ *dns.Msg) (*dns.Msg, error) {
+	return s.resp, nil
+}
+
+func TestQLog_DisabledReturnsNextUnchanged(t *testing.T) {
+	next := &stubResolver{}
+	r := qlog.New(next, disabledQL{})
+	require.Same(t, resolver.Resolver(next), r, "disabled qlog must not wrap next")
+}
+
+func BenchmarkQLog_Baseline(b *testing.B) {
+	next := &stubResolver{resp: new(dns.Msg)}
+	req := dns.NewMsg("example.com.", dns.TypeA)
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = next.Resolve(ctx, req)
+	}
+}
+
+func BenchmarkQLog_Disabled(b *testing.B) {
+	next := &stubResolver{resp: new(dns.Msg)}
+	r := qlog.New(next, disabledQL{})
+	req := dns.NewMsg("example.com.", dns.TypeA)
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = r.Resolve(ctx, req)
+	}
+}
+
+func BenchmarkQLog_EnabledNoop(b *testing.B) {
+	next := &stubResolver{resp: new(dns.Msg)}
+	r := qlog.New(next, &captureQL{})
+	req := dns.NewMsg("example.com.", dns.TypeA)
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = r.Resolve(ctx, req)
+	}
 }

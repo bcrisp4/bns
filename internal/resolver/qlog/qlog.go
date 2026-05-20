@@ -17,8 +17,13 @@ type stage struct {
 	q    logging.QueryLog
 }
 
-// New wraps next; emits a "query" line per call through q.
+// New wraps next; emits a "query" line per call through q. When q is disabled
+// (query log off) New returns next unchanged so the chain skips this stage
+// entirely on the hot path.
 func New(next resolver.Resolver, q logging.QueryLog) resolver.Resolver {
+	if !q.Enabled() {
+		return next
+	}
 	return &stage{next: next, q: q}
 }
 

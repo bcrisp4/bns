@@ -38,9 +38,11 @@ func parseLevel(s string) slog.Level {
 }
 
 // QueryLog is the interface the resolver chain uses to emit per-query lines.
-// When query logging is disabled, LogQuery is a no-op.
+// Enabled() reports whether LogQuery does real work; the resolver chain uses
+// it to skip per-query attribute construction entirely when disabled.
 type QueryLog interface {
 	LogQuery(attrs ...slog.Attr)
+	Enabled() bool
 }
 
 // QueryLogger returns a QueryLog that writes to w iff cfg.Enabled, else a no-op.
@@ -55,9 +57,12 @@ func QueryLogger(cfg config.QueryLog, w io.Writer) QueryLog {
 type noopQuery struct{}
 
 func (noopQuery) LogQuery(_ ...slog.Attr) {}
+func (noopQuery) Enabled() bool           { return false }
 
 type slogQuery struct{ logger *slog.Logger }
 
 func (s *slogQuery) LogQuery(attrs ...slog.Attr) {
 	s.logger.LogAttrs(context.Background(), slog.LevelInfo, "query", attrs...)
 }
+
+func (*slogQuery) Enabled() bool { return true }
