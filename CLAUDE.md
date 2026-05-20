@@ -6,7 +6,7 @@ File give guide to Claude Code (claude.ai/code) when work code in this repo.
 
 BNS (Ben's Name Server) — caching DNS forwarder with ad-block for small private network. Pi-hole-like. Go 1.26, module `github.com/bcrisp4/bns`, single static binary deploy on Raspberry Pi.
 
-MVP ship on `feat/mvp` (not yet merge to `main`). 17 internal packages, full chain work end-to-end, tests race-clean. See `docs/specs/2026-05-19-bns-mvp-design.md` and `docs/plans/2026-05-19-bns-mvp-implementation.md`.
+MVP shipped to `main`. v0.1.0 release tagged 2026-05-19. Container image at `ghcr.io/bcrisp4/bns` (multi-arch amd64+arm64). 17 internal packages, full chain work end-to-end, tests race-clean. See `docs/specs/2026-05-19-bns-mvp-design.md` and `docs/plans/2026-05-19-bns-mvp-implementation.md`.
 
 ## Quickstart
 
@@ -144,6 +144,16 @@ Vendored offline reference: `/home/ben.guest/vendor/miekg-dns-v2/`.
 - `/home/ben.guest/vendor/miekg-dns-v2/` — codeberg miekg/dns v2 source. Read for API confirm before guess.
 - `/home/ben.guest/vendor/hagezi-dns-blocklists/` — hagezi lists. Canonical format is `domains/` (newline-delimited FQDNs, `#` header comments only, punycode IDNs). Files big — never `Read` whole thing; use `head`/`wc -l`/`grep`.
 
+## Container
+
+- Image: `ghcr.io/bcrisp4/bns` — multi-arch (`linux/amd64`+`linux/arm64`), `gcr.io/distroless/static-debian12:nonroot`. ~10MB.
+- Build: `deploy/docker/Dockerfile` (3 stages — hagezi-fetch on `$BUILDPLATFORM`, Go cross-compile via `GOOS/GOARCH` from `TARGETOS/TARGETARCH`, distroless runtime).
+- CI: `.github/workflows/docker.yml` — buildx multi-arch + GHCR push on `main` + `v*` tags.
+- **Container listens `:5354`** — nonroot uid 65532 cannot bind privileged ports; distroless has no `setcap` so `CAP_NET_BIND_SERVICE` route unavailable. Host maps `-p 53:5354/udp -p 53:5354/tcp`.
+- Hagezi `pro.txt` baked at `/etc/bns/blocklists/pro.txt`, pinned via `HAGEZI_TAG` ARG in Dockerfile. Bump ARG to refresh.
+- Config baked at `/etc/bns/config.yaml` (source: `deploy/docker/config.yaml`). Override at runtime via bind-mount, `BNS_*` env vars, or trailing CLI flags after image name.
+- Reload blocklist without restart: `docker kill -s HUP <container>`.
+
 ## Build and test
 
 - `make build` — `bin/bns` static binary
@@ -160,6 +170,8 @@ Vendored offline reference: `/home/ben.guest/vendor/miekg-dns-v2/`.
 - **viper `AutomaticEnv` does NOT index slices via env vars.** `BNS_BLOCKLISTS__SOURCES__0__PATH` is ignored — viper never enumerates env keys; it only checks env on `Get("key.path")` calls, and slice unmarshal does not iterate indexed env. Slice config (blocklists.sources, upstreams) must come from YAML (`-c file.yaml`) or a CLI flag.
 - **Manual smoke leaves bns on `:9090`.** Background-launched bns from a manual test isn't killed when the shell command ends. Check `ss -ltnp | grep :9090` and kill before re-running another bns.
 - **Outcome label divergence from spec**: `bns_queries_total{outcome}` ∈ `{blocked, nxdomain, forwarded, error}` — NOT spec's `{hit, miss, blocked, error}`. Cache hit/miss not propagated; derive cache hit rate from `bns_upstream_queries_total` vs `bns_queries_total`.
+- **GHCR package visibility inherits from repo on first push.** Public repo → public package automatically; no manual flip. Local `gh` token here lacks `read:packages`/`write:packages` scopes — query via anonymous `docker pull` (after `docker logout ghcr.io`), not the GHCR REST API.
+- **Dev host is arm64.** `docker buildx build` default platform = arm64; pass `--platform linux/amd64` explicitly for cross-arch smoke. Multi-arch `buildx --load` not supported (single-arch only) — verify multi-arch via CI or push to registry.
 
 ## Stress harness
 
