@@ -56,3 +56,22 @@ func MarkBlocked(ctx context.Context) {
 		*m = true
 	}
 }
+
+// ClientInfo describes the transport endpoint that issued a query. The
+// handler adapter installs it in ctx so resolver stages can read it without
+// depending on the dns.ResponseWriter.
+type ClientInfo struct {
+	Addr  string // host:port form, e.g. "192.0.2.5:54321"
+	Proto string // "udp" or "tcp"
+}
+
+type clientInfoKey struct{}
+
+func WithClientInfo(ctx context.Context, info ClientInfo) context.Context {
+	return context.WithValue(ctx, clientInfoKey{}, info)
+}
+
+func ClientInfoFrom(ctx context.Context) (ClientInfo, bool) {
+	v, ok := ctx.Value(clientInfoKey{}).(ClientInfo)
+	return v, ok
+}

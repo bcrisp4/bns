@@ -69,7 +69,7 @@ metrics → qlog → block → cache → coalesce → forward
 ```
 
 - `metrics` (outermost): times every query, records `bns_queries_total{outcome,qtype}` + duration histogram, recover panics into SERVFAIL + `bns_panics_total++`. Install block marker into ctx.
-- `qlog`: emit one JSON line per query (qname, qtype, outcome, duration_ms) — no-op when `query_log.enabled=false`.
+- `qlog`: emit one JSON line per query (qname, qtype, outcome, duration_ms; plus `client` host:port and `proto` udp/tcp when the handler installs `ClientInfo` in ctx) — no-op when `query_log.enabled=false`.
 - `block`: `Holder.Current().Match(qname)` — on hit, call `resolver.MarkBlocked(ctx)` and synth NXDOMAIN (set Response=true, Rcode=NameError, copy ID + Question).
 - `cache`: lookup by `cache.Key(q)`; hit return deep-copy with TTLs decremented by age; miss call next, compute per-RR min TTL (capped by `cfg.Cache.MaxTTL`, negative-cache use SOA Minttl capped by `NegativeTTLMax`), store deep-copy.
 - `coalesce`: `singleflight.Group.Do` keyed by `cache.Key`; piggyback callers get `cache.CloneMsg` of originator response; `shared==true` increments `bns_coalesced_queries_total`.

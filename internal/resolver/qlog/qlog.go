@@ -40,11 +40,18 @@ func (s *stage) Resolve(ctx context.Context, req *dns.Msg) (*dns.Msg, error) {
 		qtype = dns.TypeToString[dns.RRToType(q0)]
 	}
 
-	s.q.LogQuery(
-		slog.String("qname", qname),
-		slog.String("qtype", qtype),
-		slog.String("outcome", resolver.Outcome(ctx, resp, err)),
-		slog.Float64("duration_ms", float64(time.Since(start).Microseconds())/1000),
-	)
+	attrs := make([]slog.Attr, 4, 6)
+	attrs[0] = slog.String("qname", qname)
+	attrs[1] = slog.String("qtype", qtype)
+	attrs[2] = slog.String("outcome", resolver.Outcome(ctx, resp, err))
+	attrs[3] = slog.Float64("duration_ms", float64(time.Since(start).Microseconds())/1000)
+	// Skip when Addr is empty to avoid logging a placeholder.
+	if info, ok := resolver.ClientInfoFrom(ctx); ok && info.Addr != "" {
+		attrs = append(attrs, slog.String("client", info.Addr))
+		if info.Proto != "" {
+			attrs = append(attrs, slog.String("proto", info.Proto))
+		}
+	}
+	s.q.LogQuery(attrs...)
 	return resp, err
 }

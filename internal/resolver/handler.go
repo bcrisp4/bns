@@ -19,12 +19,28 @@ func NewHandler(r Resolver) *Handler {
 
 // ServeDNS implements dns.Handler.
 func (h *Handler) ServeDNS(ctx context.Context, w dns.ResponseWriter, req *dns.Msg) {
+	ctx = withClientInfoFromWriter(ctx, w)
 	resp, err := h.r.Resolve(ctx, req)
 	if err != nil || resp == nil {
 		resp = servfail(req)
 	}
 	// m.WriteTo requires w to implement dns.ResponseWriter; it packs and writes.
 	_, _ = resp.WriteTo(w)
+}
+
+// withClientInfoFromWriter stashes the writer's transport endpoint in ctx
+// for downstream stages. A nil RemoteAddr skips the install to avoid
+// logging a fabricated address.
+func withClientInfoFromWriter(ctx context.Context, w dns.ResponseWriter) context.Context {
+	remote := w.RemoteAddr()
+	if remote == nil {
+		return ctx
+	}
+	info := ClientInfo{Addr: remote.String()}
+	if local := w.LocalAddr(); local != nil {
+		info.Proto = local.Network()
+	}
+	return WithClientInfo(ctx, info)
 }
 
 func servfail(req *dns.Msg) *dns.Msg {

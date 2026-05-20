@@ -70,6 +70,56 @@ func (s *stubResolver) Resolve(_ context.Context, _ *dns.Msg) (*dns.Msg, error) 
 	return s.resp, nil
 }
 
+func TestQLog_EmitsClientAndProtoWhenPresent(t *testing.T) {
+	cap := &captureQL{}
+	next := resolver.ResolverFunc(func(_ context.Context, req *dns.Msg) (*dns.Msg, error) {
+		r := new(dns.Msg)
+		r.Response = true
+		r.ID = req.ID
+		r.Question = req.Question
+		return r, nil
+	})
+	r := qlog.New(next, cap)
+
+	ctx := resolver.WithClientInfo(context.Background(), resolver.ClientInfo{
+		Addr:  "192.0.2.5:54321",
+		Proto: "udp",
+	})
+	req := dns.NewMsg("example.com.", dns.TypeA)
+	_, err := r.Resolve(ctx, req)
+	require.NoError(t, err)
+
+	require.Len(t, cap.entries, 1)
+	got := map[string]string{}
+	for _, a := range cap.entries[0] {
+		got[a.Key] = a.Value.String()
+	}
+	require.Equal(t, "192.0.2.5:54321", got["client"])
+	require.Equal(t, "udp", got["proto"])
+}
+
+func TestQLog_OmitsClientAndProtoWhenAbsent(t *testing.T) {
+	cap := &captureQL{}
+	next := resolver.ResolverFunc(func(_ context.Context, req *dns.Msg) (*dns.Msg, error) {
+		r := new(dns.Msg)
+		r.Response = true
+		r.ID = req.ID
+		r.Question = req.Question
+		return r, nil
+	})
+	r := qlog.New(next, cap)
+
+	req := dns.NewMsg("example.com.", dns.TypeA)
+	_, err := r.Resolve(context.Background(), req)
+	require.NoError(t, err)
+
+	require.Len(t, cap.entries, 1)
+	for _, a := range cap.entries[0] {
+		require.NotEqual(t, "client", a.Key, "client must be omitted when absent")
+		require.NotEqual(t, "proto", a.Key, "proto must be omitted when absent")
+	}
+}
+
 func TestQLog_DisabledReturnsNextUnchanged(t *testing.T) {
 	next := &stubResolver{}
 	r := qlog.New(next, disabledQL{})
