@@ -1,0 +1,43 @@
+# Default config baked into the bns container image.
+# Override at runtime via:
+#   - bind mount: -v /host/config.yaml:/etc/bns/config.yaml
+#   - env vars:   -e BNS_LOGGING__LEVEL=debug   (double-underscore for nesting)
+#   - CLI flags:  appended after the image name, e.g. ... bns:latest --upstream 8.8.8.8:53
+#
+# Listens on :5354 inside the container — nonroot uid cannot bind :53 directly.
+# Map host :53 to container :5354 at run time:
+#   docker run -p 53:5354/udp -p 53:5354/tcp -p 9090:9090 ghcr.io/bcrisp4/bns:latest
+
+listen:
+  udp: ":5354"
+  tcp: ":5354"
+  query_timeout: 5s
+
+upstreams:
+  - addr: "1.1.1.1:53"
+    timeout: 2s
+  - addr: "9.9.9.9:53"
+    timeout: 2s
+
+cache:
+  capacity: 10000
+  min_ttl: 0s
+  max_ttl: 86400s
+  negative_ttl_max: 900s
+
+blocklists:
+  sources:
+    - type: file
+      path: /etc/bns/blocklists/pro.txt
+
+admin:
+  listen: ":9090"
+
+logging:
+  level: info
+  format: json
+  query_log:
+    enabled: false
+
+shutdown_timeout: 5s
+startup_probe_timeout: 3s
