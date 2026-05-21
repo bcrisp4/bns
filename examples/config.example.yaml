@@ -16,18 +16,24 @@ cache:
   negative_ttl_max: 900s
 
 blocklists:
+  refresh_interval: 24h
+  cache_dir: /var/cache/bns/blocklists
   sources:
+    - type: http
+      name: hagezi-pro
+      url: https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.txt
     - type: file
+      name: custom-blocklist
       path: ./examples/sample-blocklist.txt
 
 admin:
   listen: ":9090"
 
 logging:
-  level: info
+  level: debug
   format: json
   query_log:
-    enabled: false
+    enabled: true
 
 shutdown_timeout: 5s
 startup_probe_timeout: 3s
