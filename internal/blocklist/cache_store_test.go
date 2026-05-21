@@ -72,18 +72,37 @@ func TestCacheStore_SweepRemovesOrphans(t *testing.T) {
 
 	require.NoError(t, store.Write(keepURL, []byte("k\n"), blocklist.CacheMeta{URL: keepURL, Bytes: 2, Entries: 1}))
 	require.NoError(t, store.Write(dropURL, []byte("d\n"), blocklist.CacheMeta{URL: dropURL, Bytes: 2, Entries: 1}))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "stray.txt.tmp"), []byte("x"), 0o644))
+
+	// A leftover .tmp from an interrupted write is sha256-named.
+	interruptedTmp := filepath.Join(dir, sha256hex("https://example.com/interrupted.txt")+".txt.tmp")
+	require.NoError(t, os.WriteFile(interruptedTmp, []byte("partial"), 0o644))
+
+	// A non-cache file the operator left in the directory must NOT be deleted.
+	operatorFile := filepath.Join(dir, "operator-notes.txt")
+	require.NoError(t, os.WriteFile(operatorFile, []byte("keep me"), 0o644))
 
 	removed, err := store.Sweep([]string{keepURL})
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, removed, 1)
+	// Expect exactly 3 removals: dropURL body + dropURL meta + interrupted tmp.
+	require.Equal(t, 3, removed)
 
 	_, _, err = store.Read(keepURL)
 	require.NoError(t, err)
 	_, _, err = store.Read(dropURL)
 	require.ErrorIs(t, err, blocklist.ErrCacheMiss)
-	_, err = os.Stat(filepath.Join(dir, "stray.txt.tmp"))
+
+	// Drop's meta sidecar gone.
+	dropMeta := filepath.Join(dir, sha256hex(dropURL)+".meta.json")
+	_, err = os.Stat(dropMeta)
 	require.True(t, os.IsNotExist(err))
+
+	// Interrupted .tmp gone.
+	_, err = os.Stat(interruptedTmp)
+	require.True(t, os.IsNotExist(err))
+
+	// Operator file preserved.
+	_, err = os.Stat(operatorFile)
+	require.NoError(t, err)
 }
 
 func TestCacheStore_MetaJSONIsHumanReadable(t *testing.T) {

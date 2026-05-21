@@ -67,6 +67,17 @@ func (s *CacheStore) Read(u string) ([]byte, CacheMeta, error) {
 // Write atomically persists body + meta for u. cache_dir is created if
 // missing. Body and meta are written to .tmp files, fsynced, then
 // renamed into place so readers never observe a partial write.
+//
+// Caller serialisation: concurrent Write calls for the same URL race on
+// the shared .tmp filename and produce undefined intermediate state
+// (the final body is whichever rename wins). The Fetcher serialises by
+// design; other callers must do the same.
+//
+// Partial-failure semantics: if the body write succeeds but the meta
+// write fails, the cache holds a fresh body alongside a stale (or
+// absent) sidecar. Read tolerates this — body is returned with a
+// zero-valued CacheMeta — but the next fetch will lose ETag /
+// Last-Modified and re-download the whole body.
 func (s *CacheStore) Write(u string, body []byte, meta CacheMeta) error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir cache_dir: %w", err)
@@ -110,14 +121,39 @@ func (s *CacheStore) Sweep(keep []string) (int, error) {
 		if _, ok := keepSet[name]; ok {
 			continue
 		}
-		if strings.HasSuffix(name, ".tmp") || strings.HasSuffix(name, ".txt") || strings.HasSuffix(name, ".meta.json") {
-			if err := os.Remove(filepath.Join(s.dir, name)); err != nil {
-				return removed, fmt.Errorf("remove orphan %s: %w", name, err)
-			}
-			removed++
+		if !isCacheFilename(name) {
+			continue
 		}
+		if err := os.Remove(filepath.Join(s.dir, name)); err != nil {
+			return removed, fmt.Errorf("remove orphan %s: %w", name, err)
+		}
+		removed++
 	}
 	return removed, nil
+}
+
+// isCacheFilename reports whether name follows one of the patterns this
+// store ever creates: <64-hex>.txt, <64-hex>.meta.json, <64-hex>.txt.tmp,
+// or <64-hex>.meta.json.tmp. Sweep uses this to avoid deleting unrelated
+// operator files that might share the directory.
+func isCacheFilename(name string) bool {
+	for _, suffix := range []string{".txt", ".meta.json", ".txt.tmp", ".meta.json.tmp"} {
+		if !strings.HasSuffix(name, suffix) {
+			continue
+		}
+		stem := strings.TrimSuffix(name, suffix)
+		if len(stem) != 64 {
+			return false
+		}
+		for i := 0; i < 64; i++ {
+			c := stem[i]
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func hashURL(u string) string {
