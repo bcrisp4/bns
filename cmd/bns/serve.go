@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -51,7 +50,6 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().String("listen.tcp", "", `TCP listen address host:port (default ":53")`)
 	cmd.Flags().Duration("listen.query-timeout", 0, "Per-query handling timeout (default 5s)")
 	cmd.Flags().StringSlice("upstream", nil, "Upstream resolver addr host:port; repeat for multiple (no default; required)")
-	cmd.Flags().StringSlice("blocklist", nil, "Blocklist file path; repeat for multiple (default none)")
 	cmd.Flags().Int("cache.capacity", 0, "Maximum cached DNS responses (default 10000)")
 	cmd.Flags().Duration("cache.min-ttl", 0, "Floor applied to cached entry TTL (default 0s)")
 	cmd.Flags().Duration("cache.max-ttl", 0, "Ceiling applied to cached entry TTL (default 24h)")
@@ -98,12 +96,6 @@ func bindServeFlags(v *viper.Viper, c *cobra.Command) error {
 	setSliceFlag(v, c, "upstream", "upstreams", func(addr string) map[string]any {
 		return map[string]any{"addr": addr, "timeout": "2s"}
 	})
-	setSliceFlag(v, c, "blocklist", "blocklists.sources", func(path string) map[string]any {
-		// Name derived from the basename so the new schema's `name` requirement
-		// is satisfied. This flag is going away in the http-source rewrite;
-		// no need to support collision-free naming here.
-		return map[string]any{"type": "file", "name": filepath.Base(path), "path": path}
-	})
 	return nil
 }
 
@@ -142,7 +134,44 @@ func runServe(ctx context.Context, cfg config.Config) error {
 			return fmt.Errorf("blocklist source %q: unsupported type %q", s.Name, s.Type)
 		}
 	}
-	_ = store
+	// Bootstrap resolver for the fetcher: dial configured upstream IPs
+	// directly, bypassing the system stub (which may point at this very
+	// BNS process when BNS is the LAN's sole resolver).
+	upstreamAddrs := make([]string, 0, len(cfg.Upstreams))
+	for _, u := range cfg.Upstreams {
+		upstreamAddrs = append(upstreamAddrs, u.Addr)
+	}
+	bootstrapResolver := blocklist.NewBootstrapResolver(upstreamAddrs)
+	httpClient := &http.Client{
+		Timeout: 60 * time.Second,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:  10 * time.Second,
+				Resolver: bootstrapResolver,
+			}).DialContext,
+			MaxIdleConns:        10,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
+		},
+	}
+
+	targets := make([]blocklist.FetchTarget, 0)
+	for _, s := range cfg.Blocklists.Sources {
+		if s.Type == "http" {
+			targets = append(targets, blocklist.FetchTarget{Name: s.Name, URL: s.URL})
+		}
+	}
+
+	fetcher := blocklist.NewFetcher(blocklist.FetcherConfig{
+		Store:     store,
+		Client:    httpClient,
+		Interval:  cfg.Blocklists.RefreshInterval,
+		Logger:    logger,
+		Metrics:   mtr.BlocklistFetcherMetrics(),
+		UserAgent: "bns/dev (+https://github.com/bcrisp4/bns)",
+	})
+
 	loader := blocklist.NewLoader(sources)
 	initial, count, err := loader.Load(ctx)
 	if err != nil {
@@ -231,8 +260,26 @@ func runServe(ctx context.Context, cfg config.Config) error {
 		}
 		return nil
 	})
+	reloadFromDisk := func() {
+		rctx, cancel := context.WithTimeout(gctx, 30*time.Second)
+		defer cancel()
+		next, rcount, rerr := loader.Load(rctx)
+		if rerr != nil {
+			logger.Error("blocklist reload failed", "err", rerr)
+			mtr.BlocklistReloadsTotal.WithLabelValues("error").Inc()
+			return
+		}
+		holder.Swap(next)
+		mtr.BlocklistEntries.Set(float64(next.Size()))
+		mtr.BlocklistLoadedTimestamp.Set(float64(time.Now().Unix()))
+		mtr.BlocklistReloadsTotal.WithLabelValues("ok").Inc()
+		logger.Info("blocklist reloaded", "raw", rcount, "unique", next.Size())
+	}
+
 	g.Go(func() error {
-		// SIGHUP triggers a live blocklist reload without restarting the process.
+		return fetcher.Run(gctx, targets, reloadFromDisk)
+	})
+	g.Go(func() error {
 		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, syscall.SIGHUP)
 		defer signal.Stop(ch)
@@ -241,20 +288,9 @@ func runServe(ctx context.Context, cfg config.Config) error {
 			case <-gctx.Done():
 				return nil
 			case <-ch:
-				logger.Info("SIGHUP received, reloading blocklist")
-				rctx, cancel := context.WithTimeout(gctx, 30*time.Second)
-				next, rcount, rerr := loader.Load(rctx)
-				cancel()
-				if rerr != nil {
-					logger.Error("blocklist reload failed", "err", rerr)
-					mtr.BlocklistReloadsTotal.WithLabelValues("error").Inc()
-					continue
-				}
-				holder.Swap(next)
-				mtr.BlocklistEntries.Set(float64(next.Size()))
-				mtr.BlocklistLoadedTimestamp.Set(float64(time.Now().Unix()))
-				mtr.BlocklistReloadsTotal.WithLabelValues("ok").Inc()
-				logger.Info("blocklist reloaded", "raw", rcount, "unique", next.Size())
+				logger.Info("SIGHUP received, reloading blocklist + kicking fetcher")
+				reloadFromDisk()
+				fetcher.RefreshNow()
 			}
 		}
 	})

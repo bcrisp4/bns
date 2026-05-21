@@ -51,41 +51,6 @@ blocklists:
 	require.Equal(t, "/tmp/from-yaml.txt", cfg.Blocklists.Sources[0].Path)
 }
 
-// With --blocklist the YAML sources are fully replaced.
-func TestServeFlags_BlocklistReplacesYAML(t *testing.T) {
-	yaml := writeYAML(t, `
-upstreams:
-  - addr: "1.1.1.1:53"
-    timeout: 2s
-blocklists:
-  sources:
-    - type: file
-      name: yaml-list
-      path: /tmp/from-yaml.txt
-`)
-	cfg := loadWithArgs(t, yaml,
-		"--blocklist", "/tmp/a.txt",
-		"--blocklist", "/tmp/b.txt",
-	)
-	require.Len(t, cfg.Blocklists.Sources, 2)
-	require.Equal(t, "file", cfg.Blocklists.Sources[0].Type)
-	require.Equal(t, "/tmp/a.txt", cfg.Blocklists.Sources[0].Path)
-	require.Equal(t, "/tmp/b.txt", cfg.Blocklists.Sources[1].Path)
-}
-
-// --upstream and --blocklist may be combined; both replace their YAML counterparts.
-func TestServeFlags_UpstreamAndBlocklistTogether(t *testing.T) {
-	cfg := loadWithArgs(t, "",
-		"--upstream", "9.9.9.9:53",
-		"--blocklist", "/tmp/x.txt",
-	)
-	require.Len(t, cfg.Upstreams, 1)
-	require.Equal(t, "9.9.9.9:53", cfg.Upstreams[0].Addr)
-	require.Equal(t, 2*time.Second, cfg.Upstreams[0].Timeout)
-	require.Len(t, cfg.Blocklists.Sources, 1)
-	require.Equal(t, "/tmp/x.txt", cfg.Blocklists.Sources[0].Path)
-}
-
 // Duration flag (--cache.max-ttl) overrides YAML.
 func TestServeFlags_DurationOverride(t *testing.T) {
 	yaml := writeYAML(t, `
