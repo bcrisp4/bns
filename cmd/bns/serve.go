@@ -137,11 +137,11 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	// Bootstrap resolver for the fetcher: dial configured upstream IPs
 	// directly, bypassing the system stub (which may point at this very
 	// BNS process when BNS is the LAN's sole resolver).
-	upstreamAddrs := make([]string, 0, len(cfg.Upstreams))
+	bootstrapAddrs := make([]string, 0, len(cfg.Upstreams))
 	for _, u := range cfg.Upstreams {
-		upstreamAddrs = append(upstreamAddrs, u.Addr)
+		bootstrapAddrs = append(bootstrapAddrs, u.Addr)
 	}
-	bootstrapResolver := blocklist.NewBootstrapResolver(upstreamAddrs)
+	bootstrapResolver := blocklist.NewBootstrapResolver(bootstrapAddrs)
 	httpClient := &http.Client{
 		Timeout: 60 * time.Second,
 		Transport: &http.Transport{
@@ -156,7 +156,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 		},
 	}
 
-	targets := make([]blocklist.FetchTarget, 0)
+	targets := make([]blocklist.FetchTarget, 0, len(cfg.Blocklists.Sources))
 	for _, s := range cfg.Blocklists.Sources {
 		if s.Type == "http" {
 			targets = append(targets, blocklist.FetchTarget{Name: s.Name, URL: s.URL})
@@ -261,7 +261,11 @@ func runServe(ctx context.Context, cfg config.Config) error {
 		return nil
 	})
 	reloadFromDisk := func() {
-		rctx, cancel := context.WithTimeout(gctx, 30*time.Second)
+		if gctx.Err() != nil {
+			// Already shutting down — skip to avoid spurious error metric bumps.
+			return
+		}
+		rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		next, rcount, rerr := loader.Load(rctx)
 		if rerr != nil {
