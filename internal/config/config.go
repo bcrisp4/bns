@@ -38,15 +38,23 @@ type Cache struct {
 	NegativeTTLMax time.Duration `mapstructure:"negative_ttl_max"`
 }
 
-// Blocklists configures the ad-blocking blocklist sources.
+// Blocklists configures the ad-blocking blocklist sources and the
+// background HTTP fetcher.
 type Blocklists struct {
-	Sources []BlocklistSource `mapstructure:"sources"`
+	RefreshInterval time.Duration     `mapstructure:"refresh_interval"`
+	CacheDir        string            `mapstructure:"cache_dir"`
+	Sources         []BlocklistSource `mapstructure:"sources"`
 }
 
 // BlocklistSource is one source of blocklist entries.
+//
+// Name is required and used as the metric label and log field. It must
+// be unique across sources.
 type BlocklistSource struct {
-	Type string `mapstructure:"type"` // "file"
+	Type string `mapstructure:"type"` // "file" | "http"
+	Name string `mapstructure:"name"`
 	Path string `mapstructure:"path"` // for type="file"
+	URL  string `mapstructure:"url"`  // for type="http"
 }
 
 // Admin configures the HTTP server hosting /metrics, /healthz, /readyz.
