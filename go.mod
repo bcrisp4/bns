@@ -64,6 +64,7 @@ require (
 	github.com/tantalor93/doq-go v0.15.0 // indirect
 	github.com/xhit/go-str2duration/v2 v2.1.0 // indirect
 	go-hep.org/x/hep v0.39.0 // indirect
+	go.uber.org/goleak v1.3.0 // indirect
 	go.uber.org/ratelimit v0.3.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
