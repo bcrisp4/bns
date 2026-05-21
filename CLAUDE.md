@@ -180,6 +180,9 @@ Vendored offline reference: `/home/ben.guest/vendor/miekg-dns-v2/`.
 - **Outcome label divergence from spec**: `bns_queries_total{outcome}` ∈ `{blocked, nxdomain, forwarded, error}` — NOT spec's `{hit, miss, blocked, error}`. Cache hit/miss not propagated; derive cache hit rate from `bns_upstream_queries_total` vs `bns_queries_total`.
 - **GHCR package visibility inherits from repo on first push.** Public repo → public package automatically; no manual flip. Local `gh` token here lacks `read:packages`/`write:packages` scopes — query via anonymous `docker pull` (after `docker logout ghcr.io`), not the GHCR REST API.
 - **Dev host is arm64.** `docker buildx build` default platform = arm64; pass `--platform linux/amd64` explicitly for cross-arch smoke. Multi-arch `buildx --load` not supported (single-arch only) — verify multi-arch via CI or push to registry.
+- **Discard logger idiom** — use `slog.New(slog.DiscardHandler)` (Go 1.24+), not `slog.New(slog.NewTextHandler(io.Discard, nil))`. The latter still allocates and calls `Enabled` before dropping.
+- **Don't set `Accept-Encoding: gzip` on outgoing requests** unless you also wrap the response with `gzip.NewReader`. Stdlib's `net/http` Transport only does transparent decompression when the caller does NOT set the header explicitly. Setting it once silently disables decode and hands the raw gzip bytes back.
+- **Run `find . -name '*.go' -not -path '*/vendor/*' | xargs gofmt -l` before commit** — `make lint` is CI-only but gofmt is local. Catches whitespace/alignment drift cheaply.
 
 ## Stress harness
 
