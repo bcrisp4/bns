@@ -62,15 +62,15 @@ func (c Config) Validate() error {
 	if c.Blocklists.RefreshInterval > 0 && c.Blocklists.RefreshInterval < time.Minute {
 		return fmt.Errorf("blocklists.refresh_interval %s must be >= 1m (or 0 to disable refresh)", c.Blocklists.RefreshInterval)
 	}
-	seenNames := make(map[string]struct{}, len(c.Blocklists.Sources))
+	seenNames := make(map[string]int, len(c.Blocklists.Sources))
 	for i, s := range c.Blocklists.Sources {
 		if s.Name == "" {
 			return fmt.Errorf("blocklists.sources[%d].name is required", i)
 		}
-		if _, dup := seenNames[s.Name]; dup {
-			return fmt.Errorf("blocklists.sources[%d].name %q must be unique", i, s.Name)
+		if firstIdx, dup := seenNames[s.Name]; dup {
+			return fmt.Errorf("blocklists.sources[%d].name %q must be unique (already declared at sources[%d])", i, s.Name, firstIdx)
 		}
-		seenNames[s.Name] = struct{}{}
+		seenNames[s.Name] = i
 		switch s.Type {
 		case "file":
 			if s.Path == "" {

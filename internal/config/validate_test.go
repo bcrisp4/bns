@@ -72,10 +72,10 @@ func TestValidate_BlocklistSource_HTTPRequiresURL(t *testing.T) {
 	cfg.Blocklists.Sources = []config.BlocklistSource{{Type: "http", Name: "x"}}
 	err := cfg.Validate()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "url")
+	require.Contains(t, err.Error(), "url is required")
 }
 
-func TestValidate_BlocklistSource_HTTPURLSchemeAllowed(t *testing.T) {
+func TestValidate_BlocklistSource_HTTPURLSchemeRejected(t *testing.T) {
 	cfg := validatableConfig()
 	cfg.Blocklists.Sources = []config.BlocklistSource{{Type: "http", Name: "x", URL: "ftp://example.com/x"}}
 	err := cfg.Validate()
@@ -88,7 +88,7 @@ func TestValidate_BlocklistSource_FileRequiresPath(t *testing.T) {
 	cfg.Blocklists.Sources = []config.BlocklistSource{{Type: "file", Name: "x"}}
 	err := cfg.Validate()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "path")
+	require.Contains(t, err.Error(), "path is required")
 }
 
 func TestValidate_BlocklistSource_TypeAllowlist(t *testing.T) {
