@@ -65,3 +65,10 @@ startup_probe_timeout: 3s
 	require.Equal(t, "hagezi-pro", cfg.Blocklists.Sources[1].Name)
 	require.Equal(t, "https://example.com/pro.txt", cfg.Blocklists.Sources[1].URL)
 }
+
+func TestDefault_BlocklistsKeysPresent(t *testing.T) {
+	d := config.Default()
+	require.Equal(t, 24*time.Hour, d.Blocklists.RefreshInterval)
+	require.Equal(t, "/var/cache/bns/blocklists", d.Blocklists.CacheDir)
+	require.Nil(t, d.Blocklists.Sources)
+}

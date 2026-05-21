@@ -18,7 +18,10 @@ func Default() Config {
 			MaxTTL:         24 * time.Hour,
 			NegativeTTLMax: 15 * time.Minute,
 		},
-		Blocklists: Blocklists{},
+		Blocklists: Blocklists{
+			RefreshInterval: 24 * time.Hour,
+			CacheDir:        "/var/cache/bns/blocklists",
+		},
 		Admin:      Admin{Listen: ":9090"},
 		Logging: Logging{
 			Level:    "info",
