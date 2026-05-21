@@ -182,7 +182,9 @@ func TestFetcher_Run_SweepsOrphansOnStartup(t *testing.T) {
 }
 
 func TestFetcher_Run_CallsReloadOnlyWhenSomethingChanged(t *testing.T) {
+	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
 		if r.Header.Get("If-None-Match") == `"v1"` {
 			w.WriteHeader(http.StatusNotModified)
 			return
@@ -202,10 +204,14 @@ func TestFetcher_Run_CallsReloadOnlyWhenSomethingChanged(t *testing.T) {
 	done := make(chan struct{})
 	go func() { _ = f.Run(ctx, targets, func() { atomic.AddInt32(&reloaded, 1) }); close(done) }()
 
+	// First fetch is a 200 → reload fires once.
 	require.Eventually(t, func() bool { return atomic.LoadInt32(&reloaded) == 1 }, 2*time.Second, 10*time.Millisecond)
 
+	// Trigger a second cycle; server returns 304.
 	f.RefreshNow()
-	time.Sleep(200 * time.Millisecond)
+	require.Eventually(t, func() bool { return atomic.LoadInt32(&hits) >= 2 }, 2*time.Second, 10*time.Millisecond)
+
+	// Reload count must still be 1 (304 = no change).
 	require.Equal(t, int32(1), atomic.LoadInt32(&reloaded))
 
 	cancel()

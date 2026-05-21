@@ -223,12 +223,12 @@ func (f *Fetcher) Run(ctx context.Context, targets []FetchTarget, onReload func(
 	}
 
 	cycle := func() {
-		any := false
+		changed := false
 		for _, t := range targets {
 			res, _ := f.FetchOne(ctx, t)
 			switch res.Outcome {
 			case FetchOutcomeSuccess:
-				any = true
+				changed = true
 				f.cfg.Logger.Info("blocklist fetched",
 					"source", t.Name, "outcome", string(res.Outcome),
 					"bytes", res.Bytes, "entries", res.Entries,
@@ -246,7 +246,7 @@ func (f *Fetcher) Run(ctx context.Context, targets []FetchTarget, onReload func(
 					"duration_ms", res.Duration.Milliseconds())
 			}
 		}
-		if any {
+		if changed {
 			onReload()
 		}
 	}

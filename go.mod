@@ -8,6 +8,8 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
+	github.com/tantalor93/dnspyre/v3 v3.11.0
+	go.uber.org/goleak v1.3.0
 	golang.org/x/sync v0.20.0
 )
 
@@ -19,8 +21,6 @@ require (
 	git.sr.ht/~sbinet/gg v0.7.0 // indirect
 	github.com/HdrHistogram/hdrhistogram-go v1.2.0 // indirect
 	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b // indirect
-	github.com/alecthomas/kingpin/v2 v2.4.0 // indirect
-	github.com/alecthomas/units v0.0.0-20240927000941-0f3dac36c52b // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -59,12 +59,9 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
-	github.com/tantalor93/dnspyre/v3 v3.11.0 // indirect
 	github.com/tantalor93/doh-go v0.6.0 // indirect
 	github.com/tantalor93/doq-go v0.15.0 // indirect
-	github.com/xhit/go-str2duration/v2 v2.1.0 // indirect
 	go-hep.org/x/hep v0.39.0 // indirect
-	go.uber.org/goleak v1.3.0 // indirect
 	go.uber.org/ratelimit v0.3.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
