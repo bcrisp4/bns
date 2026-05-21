@@ -60,15 +60,15 @@ type FetcherMetrics struct {
 }
 
 // Fetcher owns the HTTP client + ticker that keeps the on-disk cache
-// fresh. FetchOne is the smallest unit; Run drives the ticker (added
-// in a follow-up task).
+// fresh. FetchOne is the smallest unit; Run drives the ticker loop.
 //
 // Concurrency: FetchOne is NOT safe to call concurrently on the same
 // target — concurrent Writes to the same URL race on the shared tmp
 // path inside CacheStore. The Run loop calls FetchOne serially per
 // target by design; other callers must serialise too.
 type Fetcher struct {
-	cfg FetcherConfig
+	cfg        FetcherConfig
+	refreshNow chan struct{}
 }
 
 // NewFetcher constructs a Fetcher. Client is the only required
@@ -83,7 +83,10 @@ func NewFetcher(cfg FetcherConfig) *Fetcher {
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = "bns/dev (+https://github.com/bcrisp4/bns)"
 	}
-	return &Fetcher{cfg: cfg}
+	return &Fetcher{
+		cfg:        cfg,
+		refreshNow: make(chan struct{}, refreshChanBuf),
+	}
 }
 
 // FetchOne performs a single conditional GET and persists the result.
@@ -187,6 +190,103 @@ func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) (FetchResult, err
 	f.markSuccess(t.Name, start)
 	f.setEntries(t.Name, len(entries))
 	return res, nil
+}
+
+// refreshNow buffer 1 so a SIGHUP-poke is non-blocking even mid-fetch;
+// extra pokes coalesce.
+const refreshChanBuf = 1
+
+// Run drives one initial fetch cycle, then loops on the configured
+// interval. Each cycle fetches every target sequentially; if at least
+// one target produced a new body, onReload is invoked so the Loader
+// can rebuild the matcher from disk.
+//
+// Run also performs a one-shot orphan sweep before the first cycle:
+// cache files whose URL is not in targets (plus any leftover .tmp) are
+// deleted. The sweep does not run again for the lifetime of the
+// process — config changes that drop a source require restart.
+//
+// Returns nil when ctx is cancelled. Always honours ctx.Done().
+func (f *Fetcher) Run(ctx context.Context, targets []FetchTarget, onReload func()) error {
+	urls := make([]string, 0, len(targets))
+	for _, t := range targets {
+		urls = append(urls, t.URL)
+	}
+	if removed, err := f.cfg.Store.Sweep(urls); err != nil {
+		f.cfg.Logger.Warn("blocklist cache sweep failed", "err", err)
+	} else if removed > 0 {
+		f.cfg.Logger.Info("blocklist cache swept", "removed", removed)
+	}
+
+	if onReload == nil {
+		onReload = func() {}
+	}
+
+	cycle := func() {
+		any := false
+		for _, t := range targets {
+			res, _ := f.FetchOne(ctx, t)
+			switch res.Outcome {
+			case FetchOutcomeSuccess:
+				any = true
+				f.cfg.Logger.Info("blocklist fetched",
+					"source", t.Name, "outcome", string(res.Outcome),
+					"bytes", res.Bytes, "entries", res.Entries,
+					"duration_ms", res.Duration.Milliseconds(),
+					"status", res.StatusCode)
+			case FetchOutcomeNotModified:
+				f.cfg.Logger.Info("blocklist fetched",
+					"source", t.Name, "outcome", string(res.Outcome),
+					"duration_ms", res.Duration.Milliseconds(),
+					"status", res.StatusCode)
+			case FetchOutcomeFailure:
+				f.cfg.Logger.Warn("blocklist fetch failed",
+					"source", t.Name, "err", res.Err,
+					"status", res.StatusCode,
+					"duration_ms", res.Duration.Milliseconds())
+			}
+		}
+		if any {
+			onReload()
+		}
+	}
+
+	cycle() // initial pass
+
+	if f.cfg.Interval <= 0 {
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-f.refreshNow:
+				cycle()
+			}
+		}
+	}
+
+	ticker := time.NewTicker(f.cfg.Interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			cycle()
+		case <-f.refreshNow:
+			cycle()
+		}
+	}
+}
+
+// RefreshNow asks Run to begin an extra fetch cycle as soon as it is
+// not actively in one. Non-blocking; coalesces repeated calls (one
+// pending poke is enough). Safe to call before Run starts — the poke
+// is queued and consumed by Run's first select.
+func (f *Fetcher) RefreshNow() {
+	select {
+	case f.refreshNow <- struct{}{}:
+	default:
+	}
 }
 
 func (f *Fetcher) recordOutcome(name string, o FetchOutcome) {

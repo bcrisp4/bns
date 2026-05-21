@@ -2,8 +2,10 @@ package blocklist_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -113,4 +115,99 @@ func TestFetcher_FetchOne_RejectsBodyOverMaxSize(t *testing.T) {
 	res, err := f.FetchOne(context.Background(), blocklist.FetchTarget{Name: "x", URL: srv.URL})
 	require.NoError(t, err)
 	require.Equal(t, blocklist.FetchOutcomeFailure, res.Outcome)
+}
+
+func TestFetcher_Run_TriggersFetchOnRefreshNow(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("ETag", `"v1"`)
+		_, _ = w.Write([]byte("example.com\n"))
+	}))
+	t.Cleanup(srv.Close)
+
+	store := blocklist.NewCacheStore(t.TempDir())
+	var reloaded int32
+	f := blocklist.NewFetcher(blocklist.FetcherConfig{
+		Store: store, Client: srv.Client(),
+		Interval: time.Hour, // long; we drive via refreshNow
+	})
+	targets := []blocklist.FetchTarget{{Name: "x", URL: srv.URL}}
+	onReload := func() { atomic.AddInt32(&reloaded, 1) }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan struct{})
+	go func() { _ = f.Run(ctx, targets, onReload); close(done) }()
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&reloaded) >= 1
+	}, 2*time.Second, 10*time.Millisecond)
+
+	f.RefreshNow()
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&hits) >= 2
+	}, 2*time.Second, 10*time.Millisecond)
+
+	cancel()
+	<-done
+}
+
+func TestFetcher_Run_SweepsOrphansOnStartup(t *testing.T) {
+	dir := t.TempDir()
+	store := blocklist.NewCacheStore(dir)
+	require.NoError(t, store.Write("https://orphan.example/x", []byte("a\n"), blocklist.CacheMeta{URL: "https://orphan.example/x", Bytes: 2, Entries: 1}))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("ETag", `"v1"`)
+		_, _ = w.Write([]byte("example.com\n"))
+	}))
+	t.Cleanup(srv.Close)
+
+	f := blocklist.NewFetcher(blocklist.FetcherConfig{Store: store, Client: srv.Client(), Interval: time.Hour})
+	targets := []blocklist.FetchTarget{{Name: "x", URL: srv.URL}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan struct{})
+	go func() { _ = f.Run(ctx, targets, func() {}); close(done) }()
+
+	require.Eventually(t, func() bool {
+		_, _, err := store.Read("https://orphan.example/x")
+		return errors.Is(err, blocklist.ErrCacheMiss)
+	}, 2*time.Second, 20*time.Millisecond)
+
+	cancel()
+	<-done
+}
+
+func TestFetcher_Run_CallsReloadOnlyWhenSomethingChanged(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") == `"v1"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", `"v1"`)
+		_, _ = w.Write([]byte("example.com\n"))
+	}))
+	t.Cleanup(srv.Close)
+
+	store := blocklist.NewCacheStore(t.TempDir())
+	var reloaded int32
+	f := blocklist.NewFetcher(blocklist.FetcherConfig{Store: store, Client: srv.Client(), Interval: time.Hour})
+	targets := []blocklist.FetchTarget{{Name: "x", URL: srv.URL}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan struct{})
+	go func() { _ = f.Run(ctx, targets, func() { atomic.AddInt32(&reloaded, 1) }); close(done) }()
+
+	require.Eventually(t, func() bool { return atomic.LoadInt32(&reloaded) == 1 }, 2*time.Second, 10*time.Millisecond)
+
+	f.RefreshNow()
+	time.Sleep(200 * time.Millisecond)
+	require.Equal(t, int32(1), atomic.LoadInt32(&reloaded))
+
+	cancel()
+	<-done
 }
