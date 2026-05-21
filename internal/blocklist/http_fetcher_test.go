@@ -28,8 +28,7 @@ func TestFetcher_FetchOne_200WritesCache(t *testing.T) {
 		Interval: time.Hour,
 	})
 
-	res, err := f.FetchOne(context.Background(), blocklist.FetchTarget{Name: "x", URL: srv.URL})
-	require.NoError(t, err)
+	res := f.FetchOne(context.Background(), blocklist.FetchTarget{Name: "x", URL: srv.URL})
 	require.Equal(t, blocklist.FetchOutcomeSuccess, res.Outcome)
 	require.Equal(t, 2, res.Entries)
 	require.Greater(t, res.Bytes, 0)
@@ -58,12 +57,10 @@ func TestFetcher_FetchOne_304LeavesCacheUntouched(t *testing.T) {
 	f := blocklist.NewFetcher(blocklist.FetcherConfig{Store: store, Client: srv.Client(), Interval: time.Hour})
 	target := blocklist.FetchTarget{Name: "x", URL: srv.URL}
 
-	res1, err := f.FetchOne(context.Background(), target)
-	require.NoError(t, err)
+	res1 := f.FetchOne(context.Background(), target)
 	require.Equal(t, blocklist.FetchOutcomeSuccess, res1.Outcome)
 
-	res2, err := f.FetchOne(context.Background(), target)
-	require.NoError(t, err)
+	res2 := f.FetchOne(context.Background(), target)
 	require.Equal(t, blocklist.FetchOutcomeNotModified, res2.Outcome)
 	require.Equal(t, 0, res2.Bytes)
 	require.Equal(t, 2, calls)
@@ -80,8 +77,7 @@ func TestFetcher_FetchOne_5xxKeepsCacheReturnsFailure(t *testing.T) {
 	require.NoError(t, store.Write(url, []byte("example.com\n"), blocklist.CacheMeta{URL: url, Bytes: 12, Entries: 1}))
 
 	f := blocklist.NewFetcher(blocklist.FetcherConfig{Store: store, Client: srv.Client(), Interval: time.Hour})
-	res, err := f.FetchOne(context.Background(), blocklist.FetchTarget{Name: "x", URL: url})
-	require.NoError(t, err)
+	res := f.FetchOne(context.Background(), blocklist.FetchTarget{Name: "x", URL: url})
 	require.Equal(t, blocklist.FetchOutcomeFailure, res.Outcome)
 
 	body, _, err := store.Read(url)
@@ -112,8 +108,7 @@ func TestFetcher_FetchOne_RejectsBodyOverMaxSize(t *testing.T) {
 	f := blocklist.NewFetcher(blocklist.FetcherConfig{
 		Store: blocklist.NewCacheStore(t.TempDir()), Client: srv.Client(), Interval: time.Hour,
 	})
-	res, err := f.FetchOne(context.Background(), blocklist.FetchTarget{Name: "x", URL: srv.URL})
-	require.NoError(t, err)
+	res := f.FetchOne(context.Background(), blocklist.FetchTarget{Name: "x", URL: srv.URL})
 	require.Equal(t, blocklist.FetchOutcomeFailure, res.Outcome)
 }
 

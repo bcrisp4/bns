@@ -13,10 +13,10 @@ import (
 
 // Server runs UDP and TCP DNS listeners.
 type Server struct {
-	udp       *dns.Server
-	tcp       *dns.Server
-	udpReady  chan struct{}
-	tcpReady  chan struct{}
+	udp      *dns.Server
+	tcp      *dns.Server
+	udpReady chan struct{}
+	tcpReady chan struct{}
 }
 
 // New constructs a Server using pre-bound listeners. The same handler is

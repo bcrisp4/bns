@@ -68,10 +68,10 @@ func (c *captureWriter) RemoteAddr() net.Addr {
 	}
 	return &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 1234}
 }
-func (c *captureWriter) Conn() net.Conn       { return nil }
+func (c *captureWriter) Conn() net.Conn        { return nil }
 func (c *captureWriter) Session() *dns.Session { return nil }
-func (c *captureWriter) Close() error         { return nil }
-func (c *captureWriter) Hijack()              {}
+func (c *captureWriter) Close() error          { return nil }
+func (c *captureWriter) Hijack()               {}
 
 func TestHandler_WritesResolverResponse(t *testing.T) {
 	ok := new(dns.Msg)

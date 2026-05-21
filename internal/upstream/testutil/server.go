@@ -53,8 +53,8 @@ func Spawn(t *testing.T, h Handler) string {
 		NotifyStartedFunc: func(_ context.Context) { close(udpReady) },
 	}
 	tcpSrv := &dns.Server{
-		Listener: tcpLn,
-		Handler:  handler,
+		Listener:          tcpLn,
+		Handler:           handler,
 		NotifyStartedFunc: func(_ context.Context) { close(tcpReady) },
 	}
 

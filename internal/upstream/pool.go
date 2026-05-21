@@ -14,7 +14,7 @@ import (
 // Errors are aggregated; the returned error wraps all of them.
 type Pool struct {
 	upstreams []Upstream
-	names     []string        // parallel to upstreams; used as the "upstream" label value
+	names     []string         // parallel to upstreams; used as the "upstream" label value
 	m         *metrics.Metrics // nil → no metrics
 }
 

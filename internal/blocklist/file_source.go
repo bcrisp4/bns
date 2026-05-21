@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -23,8 +24,18 @@ func (s FileSource) Load(ctx context.Context) ([]string, error) {
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	// Some blocklists have long lines; bump the buffer ceiling.
+	out, err := parseReader(ctx, f)
+	if err != nil {
+		return nil, fmt.Errorf("read blocklist %q: %w", s.Path, err)
+	}
+	return out, nil
+}
+
+// parseReader reads newline-delimited blocklist lines from r, runs each
+// through ParseLine, and returns the surviving FQDNs. Long lines up to
+// 1 MiB are tolerated (some blocklists pack hostnames into wide rows).
+func parseReader(ctx context.Context, r io.Reader) ([]string, error) {
+	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	out := make([]string, 0, 1024)
@@ -37,7 +48,7 @@ func (s FileSource) Load(ctx context.Context) ([]string, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read blocklist %q: %w", s.Path, err)
+		return nil, err
 	}
 	return out, nil
 }

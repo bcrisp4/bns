@@ -7,6 +7,13 @@ import (
 	"fmt"
 )
 
+// parseBody is the byte-slice entry point shared by HTTPSource.Load and
+// Fetcher.FetchOne (which validates the body before writing the cache).
+func parseBody(body []byte) []string {
+	out, _ := parseReader(context.Background(), bytes.NewReader(body))
+	return out
+}
+
 // HTTPSource is a Source whose entries come from a remote URL but whose
 // Load reads only from the on-disk cache. The cache is populated by a
 // separate Fetcher goroutine; HTTPSource never makes network calls,
@@ -43,17 +50,4 @@ func (s *HTTPSource) Load(_ context.Context) ([]string, error) {
 		return nil, fmt.Errorf("http source %q: %w", s.name, err)
 	}
 	return parseBody(body), nil
-}
-
-// parseBody runs the byte buffer through ParseLine and returns the
-// surviving canonicalised entries.
-func parseBody(body []byte) []string {
-	lines := bytes.Split(body, []byte("\n"))
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		if fqdn, ok := ParseLine(string(line)); ok {
-			out = append(out, fqdn)
-		}
-	}
-	return out
 }

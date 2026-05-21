@@ -90,7 +90,7 @@ func bindServeFlags(v *viper.Viper, c *cobra.Command) error {
 		}
 	}
 
-	// Slice flags bypass BindPFlag — viper cannot expand a scalar StringSlice
+	// --upstream bypasses BindPFlag: viper cannot expand a scalar StringSlice
 	// flag into a nested []struct shape. Build the payload manually and v.Set,
 	// which has higher precedence than YAML/env.
 	setSliceFlag(v, c, "upstream", "upstreams", func(addr string) map[string]any {
@@ -156,12 +156,11 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	}
 
 	fetcher := blocklist.NewFetcher(blocklist.FetcherConfig{
-		Store:     store,
-		Client:    httpClient,
-		Interval:  cfg.Blocklists.RefreshInterval,
-		Logger:    logger,
-		Metrics:   mtr.BlocklistFetcherMetrics(),
-		UserAgent: "bns/dev (+https://github.com/bcrisp4/bns)",
+		Store:    store,
+		Client:   httpClient,
+		Interval: cfg.Blocklists.RefreshInterval,
+		Logger:   logger,
+		Metrics:  mtr.BlocklistFetcherMetrics(),
 	})
 
 	loader := blocklist.NewLoader(sources)

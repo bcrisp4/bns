@@ -1,8 +1,6 @@
 package blocklist_test
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -12,11 +10,6 @@ import (
 	"github.com/bcrisp4/bns/internal/blocklist"
 	"github.com/stretchr/testify/require"
 )
-
-func sha256hex(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:])
-}
 
 func TestCacheStore_WriteThenReadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
@@ -55,7 +48,7 @@ func TestCacheStore_AtomicRename_PartialTmpDoesNotCorruptReader(t *testing.T) {
 
 	require.NoError(t, store.Write(url, []byte("first\n"), blocklist.CacheMeta{URL: url, Bytes: 6, Entries: 1}))
 
-	tmp := filepath.Join(dir, sha256hex(url)+".txt.tmp")
+	tmp := filepath.Join(dir, blocklist.CacheKey(url)+".txt.tmp")
 	require.NoError(t, os.WriteFile(tmp, []byte("partial-garbage"), 0o644))
 
 	body, _, err := store.Read(url)
@@ -74,7 +67,7 @@ func TestCacheStore_SweepRemovesOrphans(t *testing.T) {
 	require.NoError(t, store.Write(dropURL, []byte("d\n"), blocklist.CacheMeta{URL: dropURL, Bytes: 2, Entries: 1}))
 
 	// A leftover .tmp from an interrupted write is sha256-named.
-	interruptedTmp := filepath.Join(dir, sha256hex("https://example.com/interrupted.txt")+".txt.tmp")
+	interruptedTmp := filepath.Join(dir, blocklist.CacheKey("https://example.com/interrupted.txt")+".txt.tmp")
 	require.NoError(t, os.WriteFile(interruptedTmp, []byte("partial"), 0o644))
 
 	// A non-cache file the operator left in the directory must NOT be deleted.
@@ -92,7 +85,7 @@ func TestCacheStore_SweepRemovesOrphans(t *testing.T) {
 	require.ErrorIs(t, err, blocklist.ErrCacheMiss)
 
 	// Drop's meta sidecar gone.
-	dropMeta := filepath.Join(dir, sha256hex(dropURL)+".meta.json")
+	dropMeta := filepath.Join(dir, blocklist.CacheKey(dropURL)+".meta.json")
 	_, err = os.Stat(dropMeta)
 	require.True(t, os.IsNotExist(err))
 
@@ -111,7 +104,7 @@ func TestCacheStore_MetaJSONIsHumanReadable(t *testing.T) {
 	url := "https://example.com/list.txt"
 	require.NoError(t, store.Write(url, []byte("x\n"), blocklist.CacheMeta{URL: url, Bytes: 2, Entries: 1, ETag: `"e"`}))
 
-	metaPath := filepath.Join(dir, sha256hex(url)+".meta.json")
+	metaPath := filepath.Join(dir, blocklist.CacheKey(url)+".meta.json")
 	raw, err := os.ReadFile(metaPath)
 	require.NoError(t, err)
 	var decoded map[string]any

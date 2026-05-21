@@ -81,7 +81,7 @@ func NewFetcher(cfg FetcherConfig) *Fetcher {
 		cfg.Logger = slog.New(slog.DiscardHandler)
 	}
 	if cfg.UserAgent == "" {
-		cfg.UserAgent = "bns/dev (+https://github.com/bcrisp4/bns)"
+		cfg.UserAgent = DefaultUserAgent
 	}
 	return &Fetcher{
 		cfg:        cfg,
@@ -90,25 +90,31 @@ func NewFetcher(cfg FetcherConfig) *Fetcher {
 }
 
 // FetchOne performs a single conditional GET and persists the result.
-// Returns nil error for every outcome; consult res.Outcome and res.Err.
-func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) (FetchResult, error) {
+// Consult res.Outcome and res.Err for what happened.
+func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) FetchResult {
 	start := time.Now()
 	res := FetchResult{Outcome: FetchOutcomeFailure}
+
+	if ctx.Err() != nil {
+		// Already cancelled — don't record a spurious failure outcome.
+		return res
+	}
 
 	defer func() {
 		res.Duration = time.Since(start)
 		f.recordOutcome(t.Name, res.Outcome)
 	}()
 
-	_, prevMeta, _ := f.cfg.Store.Read(t.URL)
+	prevMeta, _ := f.cfg.Store.ReadMeta(t.URL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.URL, nil)
 	if err != nil {
 		res.Err = fmt.Errorf("build request: %w", err)
-		return res, nil
+		return res
 	}
 	req.Header.Set("User-Agent", f.cfg.UserAgent)
-	req.Header.Set("Accept-Encoding", "gzip")
+	// Don't set Accept-Encoding manually: that disables stdlib's transparent
+	// gzip handling and we don't decode ourselves. Let Transport negotiate.
 	if prevMeta.ETag != "" {
 		req.Header.Set("If-None-Match", prevMeta.ETag)
 	}
@@ -119,32 +125,30 @@ func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) (FetchResult, err
 	resp, err := f.cfg.Client.Do(req)
 	if err != nil {
 		res.Err = fmt.Errorf("http do: %w", err)
-		return res, nil
+		return res
 	}
 	defer resp.Body.Close()
 	res.StatusCode = resp.StatusCode
 
-	switch resp.StatusCode {
-	case http.StatusNotModified:
+	if resp.StatusCode == http.StatusNotModified {
 		res.Outcome = FetchOutcomeNotModified
 		f.markSuccess(t.Name, start)
-		return res, nil
-	case http.StatusOK:
-		// fall through
-	default:
+		return res
+	}
+	if resp.StatusCode != http.StatusOK {
 		res.Err = fmt.Errorf("unexpected status %d", resp.StatusCode)
-		return res, nil
+		return res
 	}
 
 	limited := io.LimitReader(resp.Body, maxBodyBytes+1)
 	body, err := io.ReadAll(limited)
 	if err != nil {
 		res.Err = fmt.Errorf("read body: %w", err)
-		return res, nil
+		return res
 	}
 	if len(body) > maxBodyBytes {
 		res.Err = fmt.Errorf("body exceeds %d bytes", maxBodyBytes)
-		return res, nil
+		return res
 	}
 
 	entries := parseBody(body)
@@ -154,7 +158,7 @@ func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) (FetchResult, err
 		// blocklists with zero useful FQDNs don't exist in practice).
 		// Refuse to overwrite a presumably-good cache with garbage.
 		res.Err = errors.New("body parsed to zero entries; refusing to overwrite cache")
-		return res, nil
+		return res
 	}
 
 	meta := CacheMeta{
@@ -168,7 +172,7 @@ func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) (FetchResult, err
 
 	if err := f.cfg.Store.Write(t.URL, body, meta); err != nil {
 		res.Err = fmt.Errorf("persist cache: %w", err)
-		return res, nil
+		return res
 	}
 
 	res.Outcome = FetchOutcomeSuccess
@@ -176,8 +180,13 @@ func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) (FetchResult, err
 	res.Entries = len(entries)
 	f.markSuccess(t.Name, start)
 	f.setEntries(t.Name, len(entries))
-	return res, nil
+	return res
 }
+
+// DefaultUserAgent is the User-Agent header sent by Fetcher.NewFetcher's
+// default. Exposed for callers that want to assemble a custom client with
+// the same identification.
+const DefaultUserAgent = "bns/dev (+https://github.com/bcrisp4/bns)"
 
 // refreshNow buffer 1 so a SIGHUP-poke is non-blocking even mid-fetch;
 // extra pokes coalesce.
@@ -212,7 +221,7 @@ func (f *Fetcher) Run(ctx context.Context, targets []FetchTarget, onReload func(
 	cycle := func() {
 		changed := false
 		for _, t := range targets {
-			res, _ := f.FetchOne(ctx, t)
+			res := f.FetchOne(ctx, t)
 			switch res.Outcome {
 			case FetchOutcomeSuccess:
 				changed = true

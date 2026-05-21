@@ -22,7 +22,7 @@ func Default() Config {
 			RefreshInterval: 24 * time.Hour,
 			CacheDir:        "/var/cache/bns/blocklists",
 		},
-		Admin:      Admin{Listen: ":9090"},
+		Admin: Admin{Listen: ":9090"},
 		Logging: Logging{
 			Level:    "info",
 			Format:   "json",

@@ -34,7 +34,6 @@ func TestHTTPBlocklistSource_FetchThenBlock(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
 
 	// Synthetic upstream answering A queries with 1.2.3.4.
 	upstreamAddr := testutil.Spawn(t, func(req *dns.Msg) *dns.Msg {

@@ -19,16 +19,16 @@ import (
 //   - "upstream" cardinality = configured upstream count (2-3 typical)
 //   - NEVER add a qname label
 type Metrics struct {
-	QueriesTotal             *prometheus.CounterVec
-	QueryDurationSeconds     *prometheus.HistogramVec
-	UpstreamQueriesTotal     *prometheus.CounterVec
-	UpstreamDurationSeconds  *prometheus.HistogramVec
-	CacheEntries             prometheus.Gauge
-	CacheCapacity            prometheus.Gauge
-	CacheEvictionsTotal      prometheus.Counter
-	BlocklistEntries         prometheus.Gauge
-	BlocklistLoadedTimestamp prometheus.Gauge
-	BlocklistReloadsTotal    *prometheus.CounterVec
+	QueriesTotal                  *prometheus.CounterVec
+	QueryDurationSeconds          *prometheus.HistogramVec
+	UpstreamQueriesTotal          *prometheus.CounterVec
+	UpstreamDurationSeconds       *prometheus.HistogramVec
+	CacheEntries                  prometheus.Gauge
+	CacheCapacity                 prometheus.Gauge
+	CacheEvictionsTotal           prometheus.Counter
+	BlocklistEntries              prometheus.Gauge
+	BlocklistLoadedTimestamp      prometheus.Gauge
+	BlocklistReloadsTotal         *prometheus.CounterVec
 	CoalescedQueriesTotal         prometheus.Counter
 	PanicsTotal                   prometheus.Counter
 	BlocklistFetchTotal           *prometheus.CounterVec

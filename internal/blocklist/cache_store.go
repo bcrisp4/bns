@@ -42,8 +42,8 @@ func NewCacheStore(dir string) *CacheStore { return &CacheStore{dir: dir} }
 // Dir returns the cache directory passed to NewCacheStore.
 func (s *CacheStore) Dir() string { return s.dir }
 
-func (s *CacheStore) bodyPath(u string) string { return filepath.Join(s.dir, hashURL(u)+".txt") }
-func (s *CacheStore) metaPath(u string) string { return filepath.Join(s.dir, hashURL(u)+".meta.json") }
+func (s *CacheStore) bodyPath(u string) string { return filepath.Join(s.dir, CacheKey(u)+".txt") }
+func (s *CacheStore) metaPath(u string) string { return filepath.Join(s.dir, CacheKey(u)+".meta.json") }
 
 // Read returns the cached body and metadata for u. Returns ErrCacheMiss
 // when no body is present. A missing or corrupt sidecar is non-fatal:
@@ -56,12 +56,26 @@ func (s *CacheStore) Read(u string) ([]byte, CacheMeta, error) {
 	if err != nil {
 		return nil, CacheMeta{}, fmt.Errorf("read cache body: %w", err)
 	}
+	meta, _ := s.ReadMeta(u)
+	return body, meta, nil
+}
+
+// ReadMeta returns the sidecar metadata for u without reading the body.
+// A missing sidecar returns a zero CacheMeta with nil error; a corrupt
+// sidecar likewise returns zero CacheMeta (Unmarshal error swallowed —
+// the next fetch will lose ETag/Last-Modified and re-download, which is
+// the correct degradation path).
+func (s *CacheStore) ReadMeta(u string) (CacheMeta, error) {
 	var meta CacheMeta
 	rawMeta, err := os.ReadFile(s.metaPath(u))
-	if err == nil {
-		_ = json.Unmarshal(rawMeta, &meta) // best-effort
+	if errors.Is(err, fs.ErrNotExist) {
+		return meta, nil
 	}
-	return body, meta, nil
+	if err != nil {
+		return meta, fmt.Errorf("read cache meta: %w", err)
+	}
+	_ = json.Unmarshal(rawMeta, &meta)
+	return meta, nil
 }
 
 // Write atomically persists body + meta for u. cache_dir is created if
@@ -92,6 +106,12 @@ func (s *CacheStore) Write(u string, body []byte, meta CacheMeta) error {
 	if err := writeFileAtomic(s.metaPath(u), metaJSON); err != nil {
 		return fmt.Errorf("write meta: %w", err)
 	}
+	// Fsync the directory entry so the renames survive crash. Cheap once
+	// per write cycle (twice per fetch — body + meta share the directory).
+	if d, err := os.Open(s.dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
 	return nil
 }
 
@@ -111,7 +131,7 @@ func (s *CacheStore) Sweep(keep []string) (int, error) {
 	}
 	keepSet := make(map[string]struct{}, len(keep)*2)
 	for _, u := range keep {
-		h := hashURL(u)
+		h := CacheKey(u)
 		keepSet[h+".txt"] = struct{}{}
 		keepSet[h+".meta.json"] = struct{}{}
 	}
@@ -142,16 +162,18 @@ func isCacheFilename(name string) bool {
 		if !ok {
 			continue
 		}
-		if len(stem) != 64 {
+		if len(stem) != sha256.Size*2 {
 			return false
 		}
-		isHex := func(c rune) bool { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') }
-		return !strings.ContainsFunc(stem, func(c rune) bool { return !isHex(c) })
+		_, err := hex.DecodeString(stem)
+		return err == nil
 	}
 	return false
 }
 
-func hashURL(u string) string {
+// CacheKey returns the on-disk filename stem used for u. Stable for a
+// given URL; deterministic across processes.
+func CacheKey(u string) string {
 	h := sha256.Sum256([]byte(u))
 	return hex.EncodeToString(h[:])
 }
