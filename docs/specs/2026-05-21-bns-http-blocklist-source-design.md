@@ -177,6 +177,15 @@ Shutdown: `Fetcher` honors `ctx.Done()`. Mid-fetch HTTP requests cancel via
 the request context. Any `<sha256>.txt.tmp` left behind is swept by
 `Fetcher` on next startup.
 
+Orphan sweep at `Fetcher` startup: enumerate `cache_dir`, compute the
+expected file set as `{sha256(url).txt, sha256(url).meta.json}` for every
+current HTTP source, plus any `.tmp` files. Delete files not in the
+expected set. This reclaims disk after a source is removed from
+configuration. The sweep runs once at startup only — not on `SIGHUP` or
+mid-runtime — to avoid racing with concurrent fetches and to keep the
+common case (source removed, process restarted) covered. Operators
+swapping sources without restart can `rm` orphans manually.
+
 ### 5.4 HTTP client
 
 Hardcoded defaults for v1 (no config knobs):
