@@ -799,13 +799,7 @@ func parseBody(body []byte) []string {
 }
 ```
 
-If `ParseLine` is not exported, export it now (alias if necessary). Verify with:
-
-```
-grep -n 'func ParseLine' internal/blocklist/parse.go
-```
-
-If only unexported `parseLine` exists, export it as `ParseLine` and update the existing caller in `file_source.go`.
+`ParseLine` is already exported (`internal/blocklist/parse.go:23`) — no further edits to `parse.go` or `file_source.go` needed.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -818,11 +812,9 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/blocklist/http_source.go internal/blocklist/http_source_test.go internal/blocklist/parse.go internal/blocklist/file_source.go
+git add internal/blocklist/http_source.go internal/blocklist/http_source_test.go
 git commit -m "blocklist: HTTPSource backed by on-disk cache (spec §5.2)"
 ```
-
-(Only stage `parse.go` / `file_source.go` if you needed to export `ParseLine`.)
 
 ---
 
@@ -836,12 +828,14 @@ git commit -m "blocklist: HTTPSource backed by on-disk cache (spec §5.2)"
 
 The test boots an in-process miekg/dns server (using existing `internal/upstream/testutil`) that answers A queries for one synthetic name, then verifies the bootstrap resolver returns that answer instead of consulting the system stub.
 
+The existing helper signature is `testutil.Spawn(t, func(req *dns.Msg) *dns.Msg) string` (see `internal/upstream/testutil/server.go:24`). It returns a `host:port` address bound to UDP+TCP.
+
 ```go
 package blocklist_test
 
 import (
 	"context"
-	"net"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -854,16 +848,15 @@ import (
 )
 
 func TestBootstrapResolver_ResolvesViaConfiguredUpstream(t *testing.T) {
-	handler := dns.HandlerFunc(func(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) {
+	addr := testutil.Spawn(t, func(req *dns.Msg) *dns.Msg {
 		resp := new(dns.Msg)
-		dnsutil.SetReply(resp, r)
+		dnsutil.SetReply(resp, req)
 		resp.Answer = []dns.RR{&dns.A{
 			Hdr: dns.Header{Name: "fake.test.", Class: dns.ClassINET, TTL: 60},
-			A:   rdata.A{Addr: net.ParseIP("127.0.0.99").To4().IP4()},
+			A:   rdata.A{Addr: netip.MustParseAddr("127.0.0.99")},
 		}}
-		_, _ = resp.WriteTo(w)
+		return resp
 	})
-	addr := testutil.SpawnServer(t, handler) // existing helper returns "127.0.0.1:PORT"
 
 	res := blocklist.NewBootstrapResolver([]string{addr})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -874,7 +867,7 @@ func TestBootstrapResolver_ResolvesViaConfiguredUpstream(t *testing.T) {
 }
 ```
 
-Note: the exact `rdata.A` shape may differ (see `CLAUDE.md` cheat sheet — `A: rdata.A{Addr: netip.MustParseAddr("1.2.3.4")}` is the documented form; use that variant if `net.ParseIP` plus `.To4().IP4()` doesn't compile under v2).
+If the `rdata.A`/`dns.Header` shape rejects this construction under v2, fall back to the form documented in `CLAUDE.md` (`Hdr: dns.Header{...}, A: rdata.A{Addr: netip.MustParseAddr(...)}`). The cheat sheet there is authoritative for the v2 API.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1980,7 +1973,11 @@ import (
 	"testing"
 	"time"
 
+	"net/netip"
+
 	"codeberg.org/miekg/dns"
+	"codeberg.org/miekg/dns/dnsutil"
+	"codeberg.org/miekg/dns/rdata"
 	"github.com/bcrisp4/bns/internal/admin"
 	"github.com/bcrisp4/bns/internal/blocklist"
 	"github.com/bcrisp4/bns/internal/cache"
@@ -2009,8 +2006,18 @@ func TestHTTPBlocklistSource_FetchThenBlock(t *testing.T) {
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
 
-	// Synthetic upstream answering everything with NOERROR + 127.0.0.1.
-	upstreamAddr := testutil.SpawnEchoUpstream(t)
+	// Synthetic upstream answering A queries with 127.0.0.1, otherwise NOERROR-empty.
+	upstreamAddr := testutil.Spawn(t, func(req *dns.Msg) *dns.Msg {
+		resp := new(dns.Msg)
+		dnsutil.SetReply(resp, req)
+		if len(req.Question) > 0 && dns.RRToType(req.Question[0]) == dns.TypeA {
+			resp.Answer = []dns.RR{&dns.A{
+				Hdr: dns.Header{Name: req.Question[0].Header().Name, Class: dns.ClassINET, TTL: 60},
+				A:   rdata.A{Addr: netip.MustParseAddr("127.0.0.1")},
+			}}
+		}
+		return resp
+	})
 
 	// Build the resolver chain manually (mirrors serve.go but without
 	// listeners or signal handlers — we exercise the chain directly).
@@ -2075,7 +2082,7 @@ func TestHTTPBlocklistSource_FetchThenBlock(t *testing.T) {
 }
 ```
 
-If `testutil.SpawnEchoUpstream` does not exist, add it to `internal/upstream/testutil/` alongside the existing `SpawnServer` helper. It should answer A queries with `127.0.0.1` and pass through everything else.
+The synthetic upstream is built inline above using the existing `testutil.Spawn` helper — no new testutil function needed.
 
 - [ ] **Step 2: Run the test**
 
@@ -2088,7 +2095,7 @@ Expected: PASS. If the chain integration helper differs from what's shown, simpl
 - [ ] **Step 3: Commit**
 
 ```bash
-git add internal/integration/http_blocklist_test.go internal/upstream/testutil/*.go
+git add internal/integration/http_blocklist_test.go
 git commit -m "integration: cold-start http fetch then block (spec §9)"
 ```
 
