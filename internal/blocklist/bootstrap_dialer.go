@@ -2,7 +2,6 @@ package blocklist
 
 import (
 	"context"
-	"errors"
 	"net"
 	"sync/atomic"
 )
@@ -21,18 +20,20 @@ func NewBootstrapResolver(upstreamAddrs []string) *net.Resolver {
 	}
 	addrs := append([]string(nil), upstreamAddrs...)
 	var rr uint32
+	// dial ignores the stdlib-supplied `address` (which would be the
+	// system resolver target it picked) and substitutes one of our
+	// configured upstream addrs instead.
 	dial := func(ctx context.Context, network, _ string) (net.Conn, error) {
-		if len(addrs) == 0 {
-			return nil, errors.New("bootstrap resolver: no upstreams configured")
-		}
-		var lastErr error
+		var (
+			lastErr error
+			d       net.Dialer
+		)
 		// Round-robin over upstreams; first reachable wins. Mirrors Pool's
 		// "try each in order" behaviour but is dial-only — DNS framing is
 		// the stdlib resolver's job.
 		start := int(atomic.AddUint32(&rr, 1)) % len(addrs)
 		for i := 0; i < len(addrs); i++ {
 			addr := addrs[(start+i)%len(addrs)]
-			d := net.Dialer{}
 			c, err := d.DialContext(ctx, network, addr)
 			if err == nil {
 				return c, nil
