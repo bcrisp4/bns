@@ -47,7 +47,10 @@ Reload blocklists in place: `pkill -HUP -f bin/bns`.
 cmd/bns/                          main + cobra serve subcommand + signal handling
 internal/config/                  viper schema + Load + Validate
 internal/logging/                 slog factories + QueryLog gate
-internal/blocklist/               Parse, FileSource, Matcher (parent-walk), Holder (atomic swap), Loader
+internal/blocklist/               Parse, FileSource, HTTPSource (disk-only), CacheStore (atomic write+sweep),
+                                  Fetcher (HTTP client + ticker + RefreshNow + orphan sweep),
+                                  BootstrapResolver (custom net.Resolver via upstream IPs),
+                                  Matcher (parent-walk), Holder (atomic swap), Loader
 internal/cache/                   in-tree LRU + CloneMsg helper
 internal/upstream/                Upstream interface, UDPClient (TC=1 retry), Pool (primary+fallback)
 internal/resolver/                Resolver interface, Handler adapter (writes SERVFAIL on err),
@@ -81,7 +84,7 @@ metrics → qlog → block → cache → coalesce → forward
 | ---------------------- | --------------------------- | ------------------------------------------------------------------ | ---------------------------------- |
 | `resolver.Resolver`    | `internal/resolver`         | `Resolve(ctx, req) (*dns.Msg, error)` — never mutate req, never return both | DNSSEC validator, ECS, rewrites |
 | `upstream.Upstream`    | `internal/upstream`         | `Exchange(ctx, req) (*dns.Msg, error)`                              | DoH / DoT / DoQ clients           |
-| `blocklist.Source`     | `internal/blocklist`        | `Load(ctx) ([]string, error)` — return canonical lowercased FQDNs   | URL fetcher with refresh ticker   |
+| `blocklist.Source`     | `internal/blocklist`        | `Load(ctx) ([]string, error)` — return canonical lowercased FQDNs (disk-only; never make network calls) | FTP / S3 / git sources           |
 | `logging.QueryLog`     | `internal/logging`          | `LogQuery(attrs ...slog.Attr)` — no-op when disabled                | (stable)                          |
 | `cache.MetricsObserver`| `internal/cache`            | `SetEntries(int)`, `IncEvictions()` — wired via `metrics.CacheObserver()` | (stable)                    |
 
@@ -147,11 +150,11 @@ Vendored offline reference: `/home/ben.guest/vendor/miekg-dns-v2/`.
 ## Container
 
 - Image: `ghcr.io/bcrisp4/bns` — multi-arch (`linux/amd64`+`linux/arm64`), `gcr.io/distroless/static-debian12:nonroot`. ~10MB.
-- Build: `deploy/docker/Dockerfile` (3 stages — hagezi-fetch on `$BUILDPLATFORM`, Go cross-compile via `GOOS/GOARCH` from `TARGETOS/TARGETARCH`, distroless runtime).
+- Build: `deploy/docker/Dockerfile` (2 stages — Go cross-compile via `GOOS/GOARCH` from `TARGETOS/TARGETARCH`, distroless runtime). Image size ~25 MB. Hagezi list is no longer baked; it's fetched at runtime by the in-process Fetcher and persisted to `/var/cache/bns/blocklists` (declared as `VOLUME`).
 - CI: `.github/workflows/docker.yml` — buildx multi-arch + GHCR push on `main` + `v*` tags.
 - **Git tag → image tag transform.** `docker/metadata-action` uses `pattern={{version}}`, so git tag `v0.2.0` publishes `ghcr.io/bcrisp4/bns:0.2.0` (no `v`), plus `:0.2` and `:sha-XXXXXXX`. Main pushes also publish `:latest`.
 - **Container listens `:5354`** — nonroot uid 65532 cannot bind privileged ports; distroless has no `setcap` so `CAP_NET_BIND_SERVICE` route unavailable. Host maps `-p 53:5354/udp -p 53:5354/tcp`.
-- Hagezi `pro.txt` baked at `/etc/bns/blocklists/pro.txt`, pinned via `HAGEZI_TAG` ARG in Dockerfile. Bump ARG to refresh.
+- Default config (`deploy/docker/config.yaml`) configures the Fetcher with one HTTP source pointing at hagezi `main` branch `pro.txt`. Cold start with no cache volume = serving without a blocklist for ~seconds until the first fetch lands; mount a named volume at `/var/cache/bns` to preserve cache across restarts (`docker volume create bns-cache; docker run -v bns-cache:/var/cache/bns ...`).
 - Config baked at `/etc/bns/config.yaml` (source: `deploy/docker/config.yaml`). Override at runtime via bind-mount, `BNS_*` env vars, or trailing CLI flags after image name.
 - Reload blocklist without restart: `docker kill -s HUP <container>`.
 
@@ -167,8 +170,12 @@ Vendored offline reference: `/home/ben.guest/vendor/miekg-dns-v2/`.
 ## Gotchas
 
 - **Port 5353 is mDNS.** avahi-daemon / systemd-resolved listens on UDP/5353; bind there give `address already in use` on UDP only (TCP bind succeeds, mask cause). Use 5354 or other free port.
-- **`serve` cobra flags minimal** — `--config/-c`, `--listen.udp`, `--listen.tcp`, `--upstream`, `--pprof`. Everything else (log level, query log, cache capacity, blocklist sources) go via env (`BNS_*`, `__` for nesting) or YAML. Note: env vars cannot index slice config (see viper gotcha below).
-- **viper `AutomaticEnv` does NOT index slices via env vars.** `BNS_BLOCKLISTS__SOURCES__0__PATH` is ignored — viper never enumerates env keys; it only checks env on `Get("key.path")` calls, and slice unmarshal does not iterate indexed env. Slice config (blocklists.sources, upstreams) must come from YAML (`-c file.yaml`) or a CLI flag.
+- **`serve` cobra flags minimal** — `--config/-c`, `--listen.udp`, `--listen.tcp`, `--upstream`, `--pprof`. `--blocklist` was removed when HTTP source landed; use YAML. Everything else (log level, query log, cache capacity, blocklist sources) go via env (`BNS_*`, `__` for nesting) or YAML. Note: env vars cannot index slice config (see viper gotcha below).
+- **viper `AutomaticEnv` does NOT index slices via env vars.** `BNS_BLOCKLISTS__SOURCES__0__PATH` is ignored — viper never enumerates env keys; it only checks env on `Get("key.path")` calls, and slice unmarshal does not iterate indexed env. Slice config (blocklists.sources, upstreams) must come from YAML (`-c file.yaml`). For HTTP blocklists, `blocklists.refresh_interval` and `blocklists.cache_dir` are scalars and ARE settable via env (`BNS_BLOCKLISTS__REFRESH_INTERVAL=12h`).
+- **Source `name` is required.** Every entry under `blocklists.sources` must have `name:` (string, unique). It is the `{source="..."}` label on every `bns_blocklist_*` metric. Validation rejects missing or duplicate names with a fail-fast error at startup.
+- **HTTPSource.Load is disk-only.** Network I/O lives entirely in `Fetcher` (separate goroutine). HTTPSource just reads the cached body. Keeps request-serving path off the network.
+- **Bootstrap dialer must NOT route through the BNS resolver chain.** It dials configured upstream IPs directly via a custom `net.Resolver`. Routing fetcher DNS through the chain = deadlock (chain is busy serving the very request that the fetcher is trying to bootstrap).
+- **Cache orphan sweep runs once at startup only.** Removing a source from config without restart leaves its cache file on disk until next restart. Documented; not a bug.
 - **Manual smoke leaves bns on `:9090`.** Background-launched bns from a manual test isn't killed when the shell command ends. Check `ss -ltnp | grep :9090` and kill before re-running another bns.
 - **Outcome label divergence from spec**: `bns_queries_total{outcome}` ∈ `{blocked, nxdomain, forwarded, error}` — NOT spec's `{hit, miss, blocked, error}`. Cache hit/miss not propagated; derive cache hit rate from `bns_upstream_queries_total` vs `bns_queries_total`.
 - **GHCR package visibility inherits from repo on first push.** Public repo → public package automatically; no manual flip. Local `gh` token here lacks `read:packages`/`write:packages` scopes — query via anonymous `docker pull` (after `docker logout ghcr.io`), not the GHCR REST API.
