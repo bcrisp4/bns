@@ -29,8 +29,8 @@ type Metrics struct {
 	BlocklistEntries         prometheus.Gauge
 	BlocklistLoadedTimestamp prometheus.Gauge
 	BlocklistReloadsTotal    *prometheus.CounterVec
-	CoalescedQueriesTotal        prometheus.Counter
-	PanicsTotal                  prometheus.Counter
+	CoalescedQueriesTotal         prometheus.Counter
+	PanicsTotal                   prometheus.Counter
 	BlocklistFetchTotal           *prometheus.CounterVec
 	BlocklistLastSuccessTimestamp *prometheus.GaugeVec
 	BlocklistEntriesBySource      *prometheus.GaugeVec

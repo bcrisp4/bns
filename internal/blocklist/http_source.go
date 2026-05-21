@@ -1,6 +1,7 @@
 package blocklist
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -47,15 +48,11 @@ func (s *HTTPSource) Load(_ context.Context) ([]string, error) {
 // parseBody runs the byte buffer through ParseLine and returns the
 // surviving canonicalised entries.
 func parseBody(body []byte) []string {
-	out := make([]string, 0, 1024)
-	start := 0
-	for i := 0; i <= len(body); i++ {
-		if i == len(body) || body[i] == '\n' {
-			line := string(body[start:i])
-			if fqdn, ok := ParseLine(line); ok {
-				out = append(out, fqdn)
-			}
-			start = i + 1
+	lines := bytes.Split(body, []byte("\n"))
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if fqdn, ok := ParseLine(string(line)); ok {
+			out = append(out, fqdn)
 		}
 	}
 	return out

@@ -95,13 +95,16 @@ func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) (FetchResult, err
 	start := time.Now()
 	res := FetchResult{Outcome: FetchOutcomeFailure}
 
+	defer func() {
+		res.Duration = time.Since(start)
+		f.recordOutcome(t.Name, res.Outcome)
+	}()
+
 	_, prevMeta, _ := f.cfg.Store.Read(t.URL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.URL, nil)
 	if err != nil {
 		res.Err = fmt.Errorf("build request: %w", err)
-		res.Duration = time.Since(start)
-		f.recordOutcome(t.Name, res.Outcome)
 		return res, nil
 	}
 	req.Header.Set("User-Agent", f.cfg.UserAgent)
@@ -116,8 +119,6 @@ func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) (FetchResult, err
 	resp, err := f.cfg.Client.Do(req)
 	if err != nil {
 		res.Err = fmt.Errorf("http do: %w", err)
-		res.Duration = time.Since(start)
-		f.recordOutcome(t.Name, res.Outcome)
 		return res, nil
 	}
 	defer resp.Body.Close()
@@ -126,16 +127,12 @@ func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) (FetchResult, err
 	switch resp.StatusCode {
 	case http.StatusNotModified:
 		res.Outcome = FetchOutcomeNotModified
-		res.Duration = time.Since(start)
-		f.recordOutcome(t.Name, res.Outcome)
 		f.markSuccess(t.Name, start)
 		return res, nil
 	case http.StatusOK:
 		// fall through
 	default:
 		res.Err = fmt.Errorf("unexpected status %d", resp.StatusCode)
-		res.Duration = time.Since(start)
-		f.recordOutcome(t.Name, res.Outcome)
 		return res, nil
 	}
 
@@ -143,14 +140,10 @@ func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) (FetchResult, err
 	body, err := io.ReadAll(limited)
 	if err != nil {
 		res.Err = fmt.Errorf("read body: %w", err)
-		res.Duration = time.Since(start)
-		f.recordOutcome(t.Name, res.Outcome)
 		return res, nil
 	}
 	if len(body) > maxBodyBytes {
 		res.Err = fmt.Errorf("body exceeds %d bytes", maxBodyBytes)
-		res.Duration = time.Since(start)
-		f.recordOutcome(t.Name, res.Outcome)
 		return res, nil
 	}
 
@@ -161,8 +154,6 @@ func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) (FetchResult, err
 		// blocklists with zero useful FQDNs don't exist in practice).
 		// Refuse to overwrite a presumably-good cache with garbage.
 		res.Err = errors.New("body parsed to zero entries; refusing to overwrite cache")
-		res.Duration = time.Since(start)
-		f.recordOutcome(t.Name, res.Outcome)
 		return res, nil
 	}
 
@@ -177,16 +168,12 @@ func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) (FetchResult, err
 
 	if err := f.cfg.Store.Write(t.URL, body, meta); err != nil {
 		res.Err = fmt.Errorf("persist cache: %w", err)
-		res.Duration = time.Since(start)
-		f.recordOutcome(t.Name, res.Outcome)
 		return res, nil
 	}
 
 	res.Outcome = FetchOutcomeSuccess
 	res.Bytes = len(body)
 	res.Entries = len(entries)
-	res.Duration = time.Since(start)
-	f.recordOutcome(t.Name, res.Outcome)
 	f.markSuccess(t.Name, start)
 	f.setEntries(t.Name, len(entries))
 	return res, nil

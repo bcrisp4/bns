@@ -124,24 +124,23 @@ func runServe(ctx context.Context, cfg config.Config) error {
 
 	store := blocklist.NewCacheStore(cfg.Blocklists.CacheDir)
 	sources := make([]blocklist.Source, 0, len(cfg.Blocklists.Sources))
+	targets := make([]blocklist.FetchTarget, 0, len(cfg.Blocklists.Sources))
 	for _, s := range cfg.Blocklists.Sources {
 		switch s.Type {
 		case "file":
 			sources = append(sources, blocklist.FileSource{Path: s.Path})
 		case "http":
 			sources = append(sources, blocklist.NewHTTPSource(s.Name, s.URL, store))
+			targets = append(targets, blocklist.FetchTarget{Name: s.Name, URL: s.URL})
 		default:
 			return fmt.Errorf("blocklist source %q: unsupported type %q", s.Name, s.Type)
 		}
 	}
+
 	// Bootstrap resolver for the fetcher: dial configured upstream IPs
 	// directly, bypassing the system stub (which may point at this very
 	// BNS process when BNS is the LAN's sole resolver).
-	bootstrapAddrs := make([]string, 0, len(cfg.Upstreams))
-	for _, u := range cfg.Upstreams {
-		bootstrapAddrs = append(bootstrapAddrs, u.Addr)
-	}
-	bootstrapResolver := blocklist.NewBootstrapResolver(bootstrapAddrs)
+	bootstrapResolver := blocklist.NewBootstrapResolver(upstreamAddrs(cfg.Upstreams))
 	httpClient := &http.Client{
 		Timeout: 60 * time.Second,
 		Transport: &http.Transport{
@@ -154,13 +153,6 @@ func runServe(ctx context.Context, cfg config.Config) error {
 			IdleConnTimeout:     90 * time.Second,
 			TLSHandshakeTimeout: 10 * time.Second,
 		},
-	}
-
-	targets := make([]blocklist.FetchTarget, 0, len(cfg.Blocklists.Sources))
-	for _, s := range cfg.Blocklists.Sources {
-		if s.Type == "http" {
-			targets = append(targets, blocklist.FetchTarget{Name: s.Name, URL: s.URL})
-		}
 	}
 
 	fetcher := blocklist.NewFetcher(blocklist.FetcherConfig{

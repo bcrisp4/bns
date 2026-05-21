@@ -138,20 +138,15 @@ func (s *CacheStore) Sweep(keep []string) (int, error) {
 // operator files that might share the directory.
 func isCacheFilename(name string) bool {
 	for _, suffix := range []string{".txt", ".meta.json", ".txt.tmp", ".meta.json.tmp"} {
-		if !strings.HasSuffix(name, suffix) {
+		stem, ok := strings.CutSuffix(name, suffix)
+		if !ok {
 			continue
 		}
-		stem := strings.TrimSuffix(name, suffix)
 		if len(stem) != 64 {
 			return false
 		}
-		for i := 0; i < 64; i++ {
-			c := stem[i]
-			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-				return false
-			}
-		}
-		return true
+		isHex := func(c rune) bool { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') }
+		return !strings.ContainsFunc(stem, func(c rune) bool { return !isHex(c) })
 	}
 	return false
 }
