@@ -16,6 +16,8 @@ type HTTPSource struct {
 	store *CacheStore
 }
 
+var _ Source = (*HTTPSource)(nil)
+
 // NewHTTPSource constructs an HTTPSource. name is used as the metric
 // label and log field; url is the remote location and the cache key.
 func NewHTTPSource(name, url string, store *CacheStore) *HTTPSource {

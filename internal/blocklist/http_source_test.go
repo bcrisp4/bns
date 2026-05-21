@@ -22,14 +22,15 @@ func TestHTTPSource_LoadReturnsParsedEntriesFromCache(t *testing.T) {
 	require.ElementsMatch(t, []string{"example.com", "ads.example"}, got)
 }
 
-func TestHTTPSource_LoadReturnsEmptyOnCacheMiss(t *testing.T) {
+func TestHTTPSource_LoadReturnsNilOnCacheMiss(t *testing.T) {
 	src := blocklist.NewHTTPSource("hagezi-pro", "https://example.com/x.txt", blocklist.NewCacheStore(t.TempDir()))
 	got, err := src.Load(context.Background())
 	require.NoError(t, err)
-	require.Empty(t, got)
+	require.Nil(t, got)
 }
 
-func TestHTTPSource_Name(t *testing.T) {
+func TestHTTPSource_NameAndURL(t *testing.T) {
 	src := blocklist.NewHTTPSource("hagezi-pro", "https://example.com/x.txt", blocklist.NewCacheStore(t.TempDir()))
 	require.Equal(t, "hagezi-pro", src.Name())
+	require.Equal(t, "https://example.com/x.txt", src.URL())
 }
