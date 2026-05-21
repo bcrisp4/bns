@@ -171,10 +171,20 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	holder := blocklist.NewHolder(initial)
 	mtr.BlocklistEntries.Set(float64(initial.Size()))
 	mtr.BlocklistLoadedTimestamp.Set(float64(time.Now().Unix()))
+	allHTTP := len(cfg.Blocklists.Sources) > 0
+	for _, s := range cfg.Blocklists.Sources {
+		if s.Type != "http" {
+			allHTTP = false
+			break
+		}
+	}
 	switch {
 	case len(cfg.Blocklists.Sources) == 0:
 		logger.Warn("no blocklist sources configured — block stage is a no-op",
 			"raw", count, "unique", initial.Size())
+	case initial.Size() == 0 && allHTTP:
+		logger.Info("blocklist cache cold — fetcher will populate; block stage is a no-op until first fetch lands",
+			"sources", len(cfg.Blocklists.Sources))
 	case initial.Size() == 0:
 		logger.Warn("blocklist sources configured but yielded zero entries — check paths and file contents",
 			"sources", len(cfg.Blocklists.Sources), "raw", count, "unique", initial.Size())
