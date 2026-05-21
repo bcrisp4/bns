@@ -4,6 +4,9 @@
 package metrics
 
 import (
+	"time"
+
+	"github.com/bcrisp4/bns/internal/blocklist"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 )
@@ -26,8 +29,11 @@ type Metrics struct {
 	BlocklistEntries         prometheus.Gauge
 	BlocklistLoadedTimestamp prometheus.Gauge
 	BlocklistReloadsTotal    *prometheus.CounterVec
-	CoalescedQueriesTotal    prometheus.Counter
-	PanicsTotal              prometheus.Counter
+	CoalescedQueriesTotal        prometheus.Counter
+	PanicsTotal                  prometheus.Counter
+	BlocklistFetchTotal           *prometheus.CounterVec
+	BlocklistLastSuccessTimestamp *prometheus.GaugeVec
+	BlocklistEntriesBySource      *prometheus.GaugeVec
 }
 
 // New constructs the bundle, registers every collector with reg, and
@@ -80,6 +86,18 @@ func New(reg prometheus.Registerer) *Metrics {
 			Name: "bns_panics_total",
 			Help: "Recovered panics anywhere in the resolver chain.",
 		}),
+		BlocklistFetchTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "bns_blocklist_fetch_total",
+			Help: "HTTP blocklist fetches, by source and outcome (success|not_modified|failure).",
+		}, []string{"source", "outcome"}),
+		BlocklistLastSuccessTimestamp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "bns_blocklist_last_success_timestamp_seconds",
+			Help: "Unix time of the last successful fetch (success OR not_modified) per source.",
+		}, []string{"source"}),
+		BlocklistEntriesBySource: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "bns_blocklist_entries_by_source",
+			Help: "Parsed entry count per source after the most recent successful fetch.",
+		}, []string{"source"}),
 	}
 
 	reg.MustRegister(
@@ -88,6 +106,7 @@ func New(reg prometheus.Registerer) *Metrics {
 		m.CacheEntries, m.CacheCapacity, m.CacheEvictionsTotal,
 		m.BlocklistEntries, m.BlocklistLoadedTimestamp, m.BlocklistReloadsTotal,
 		m.CoalescedQueriesTotal, m.PanicsTotal,
+		m.BlocklistFetchTotal, m.BlocklistLastSuccessTimestamp, m.BlocklistEntriesBySource,
 	)
 	reg.MustRegister(collectors.NewGoCollector())
 	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
@@ -104,6 +123,22 @@ func New(reg prometheus.Registerer) *Metrics {
 	}
 
 	return m
+}
+
+// BlocklistFetcherMetrics returns the adapter wiring the Fetcher's
+// metric hooks into this Metrics bundle.
+func (m *Metrics) BlocklistFetcherMetrics() blocklist.FetcherMetrics {
+	return blocklist.FetcherMetrics{
+		IncFetch: func(source string, outcome blocklist.FetchOutcome) {
+			m.BlocklistFetchTotal.WithLabelValues(source, string(outcome)).Inc()
+		},
+		SetLastSuccess: func(source string, ts time.Time) {
+			m.BlocklistLastSuccessTimestamp.WithLabelValues(source).Set(float64(ts.Unix()))
+		},
+		SetEntries: func(source string, n int) {
+			m.BlocklistEntriesBySource.WithLabelValues(source).Set(float64(n))
+		},
+	}
 }
 
 // CacheObserver returns an object satisfying cache.MetricsObserver
