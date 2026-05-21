@@ -34,7 +34,7 @@ func TestDefaultsFillEverything(t *testing.T) {
 }
 
 func TestBlocklistsSchema_AcceptsHTTPSourceAndGlobalKeys(t *testing.T) {
-	yaml := []byte(`
+	yamlData := []byte(`
 listen: {udp: ":53", tcp: ":53", query_timeout: 5s}
 upstreams:
   - {addr: "1.1.1.1:53", timeout: 2s}
@@ -51,7 +51,7 @@ shutdown_timeout: 5s
 startup_probe_timeout: 3s
 `)
 	path := filepath.Join(t.TempDir(), "c.yaml")
-	require.NoError(t, os.WriteFile(path, yaml, 0o644))
+	require.NoError(t, os.WriteFile(path, yamlData, 0o644))
 
 	cfg, err := config.Load(config.LoadOptions{ConfigPath: path})
 	require.NoError(t, err)

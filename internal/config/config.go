@@ -41,9 +41,15 @@ type Cache struct {
 // Blocklists configures the ad-blocking blocklist sources and the
 // background HTTP fetcher.
 type Blocklists struct {
-	RefreshInterval time.Duration     `mapstructure:"refresh_interval"`
-	CacheDir        string            `mapstructure:"cache_dir"`
-	Sources         []BlocklistSource `mapstructure:"sources"`
+	// RefreshInterval is the global cadence at which HTTP sources are
+	// re-fetched. Must be >= 1m when set. Zero disables auto-refresh
+	// (sources still reload via SIGHUP).
+	RefreshInterval time.Duration `mapstructure:"refresh_interval"`
+	// CacheDir is the directory used to persist fetched HTTP source
+	// bodies and their sidecar metadata. Created on first write.
+	CacheDir string `mapstructure:"cache_dir"`
+	// Sources are the configured blocklist sources, in order.
+	Sources []BlocklistSource `mapstructure:"sources"`
 }
 
 // BlocklistSource is one source of blocklist entries.
