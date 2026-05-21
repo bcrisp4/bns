@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"slices"
 	"strconv"
+	"time"
 )
 
 var validLogLevels = []string{"debug", "info", "warn", "error"}
@@ -56,6 +58,38 @@ func (c Config) Validate() error {
 	}
 	if c.StartupProbeTimeout <= 0 {
 		return errors.New("startup_probe_timeout must be > 0")
+	}
+	if c.Blocklists.RefreshInterval > 0 && c.Blocklists.RefreshInterval < time.Minute {
+		return fmt.Errorf("blocklists.refresh_interval %s must be >= 1m (or 0 to disable refresh)", c.Blocklists.RefreshInterval)
+	}
+	seenNames := make(map[string]struct{}, len(c.Blocklists.Sources))
+	for i, s := range c.Blocklists.Sources {
+		if s.Name == "" {
+			return fmt.Errorf("blocklists.sources[%d].name is required", i)
+		}
+		if _, dup := seenNames[s.Name]; dup {
+			return fmt.Errorf("blocklists.sources[%d].name %q must be unique", i, s.Name)
+		}
+		seenNames[s.Name] = struct{}{}
+		switch s.Type {
+		case "file":
+			if s.Path == "" {
+				return fmt.Errorf("blocklists.sources[%d] (%s): path is required for type=file", i, s.Name)
+			}
+		case "http":
+			if s.URL == "" {
+				return fmt.Errorf("blocklists.sources[%d] (%s): url is required for type=http", i, s.Name)
+			}
+			u, err := url.Parse(s.URL)
+			if err != nil {
+				return fmt.Errorf("blocklists.sources[%d] (%s): url %q: %w", i, s.Name, s.URL, err)
+			}
+			if u.Scheme != "http" && u.Scheme != "https" {
+				return fmt.Errorf("blocklists.sources[%d] (%s): url scheme %q must be http or https", i, s.Name, u.Scheme)
+			}
+		default:
+			return fmt.Errorf("blocklists.sources[%d] (%s): type %q must be file or http", i, s.Name, s.Type)
+		}
 	}
 	return nil
 }
