@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 )
 
@@ -63,9 +62,13 @@ type FetcherMetrics struct {
 // Fetcher owns the HTTP client + ticker that keeps the on-disk cache
 // fresh. FetchOne is the smallest unit; Run drives the ticker (added
 // in a follow-up task).
+//
+// Concurrency: FetchOne is NOT safe to call concurrently on the same
+// target — concurrent Writes to the same URL race on the shared tmp
+// path inside CacheStore. The Run loop calls FetchOne serially per
+// target by design; other callers must serialise too.
 type Fetcher struct {
 	cfg FetcherConfig
-	mu  sync.Mutex // serialises Store writes
 }
 
 // NewFetcher constructs a Fetcher. Client is the only required
@@ -75,7 +78,7 @@ func NewFetcher(cfg FetcherConfig) *Fetcher {
 		cfg.Client = &http.Client{Timeout: defaultFetchTimeout}
 	}
 	if cfg.Logger == nil {
-		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+		cfg.Logger = slog.New(slog.DiscardHandler)
 	}
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = "bns/dev (+https://github.com/bcrisp4/bns)"
@@ -150,6 +153,10 @@ func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) (FetchResult, err
 
 	entries := parseBody(body)
 	if len(body) > 0 && len(entries) == 0 {
+		// Heuristic: a non-empty body that parses to zero entries is
+		// almost certainly an HTML error page or garbage response (real
+		// blocklists with zero useful FQDNs don't exist in practice).
+		// Refuse to overwrite a presumably-good cache with garbage.
 		res.Err = errors.New("body parsed to zero entries; refusing to overwrite cache")
 		res.Duration = time.Since(start)
 		f.recordOutcome(t.Name, res.Outcome)
@@ -165,10 +172,7 @@ func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) (FetchResult, err
 		Entries:      len(entries),
 	}
 
-	f.mu.Lock()
-	err = f.cfg.Store.Write(t.URL, body, meta)
-	f.mu.Unlock()
-	if err != nil {
+	if err := f.cfg.Store.Write(t.URL, body, meta); err != nil {
 		res.Err = fmt.Errorf("persist cache: %w", err)
 		res.Duration = time.Since(start)
 		f.recordOutcome(t.Name, res.Outcome)

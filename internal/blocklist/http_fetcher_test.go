@@ -88,9 +88,23 @@ func TestFetcher_FetchOne_5xxKeepsCacheReturnsFailure(t *testing.T) {
 }
 
 func TestFetcher_FetchOne_RejectsBodyOverMaxSize(t *testing.T) {
-	big := make([]byte, 65*1024*1024)
+	// Stream 65 MiB from the handler so the test process doesn't hold
+	// the buffer in memory. Just-over-cap (64 MiB + 1) is enough to
+	// trip the guard.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write(big)
+		chunk := make([]byte, 64*1024) // 64 KiB scratch
+		const total = 65 * 1024 * 1024
+		written := 0
+		for written < total {
+			n := total - written
+			if n > len(chunk) {
+				n = len(chunk)
+			}
+			if _, err := w.Write(chunk[:n]); err != nil {
+				return
+			}
+			written += n
+		}
 	}))
 	t.Cleanup(srv.Close)
 	f := blocklist.NewFetcher(blocklist.FetcherConfig{
