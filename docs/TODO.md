@@ -55,3 +55,39 @@ Tracked follow-ups. Not bugs; not currently blocking. Promote to a spec/plan whe
   invoking `./bin/bns-stress` from anywhere else gets a confusing
   open error. Either resolve relative to the binary or embed the
   queries with `embed.FS` (and let scenarios choose).
+
+## Blocklist source extensions (2026-05-21-bns-http-blocklist-source)
+
+Deferred from the HTTP-blocklist-source spec (§10). Each is independently
+schedulable and does not block the others.
+
+- **Allowlist / per-domain override.** Curated lists like hagezi can
+  false-positive on legitimate domains. Add an `allowlist:` block whose
+  matches short-circuit the block stage before the matcher.
+- **Tiered hagezi flavour selection.** `light` / `multi` / `pro` /
+  `pro.plus` / `ultimate`. A single config key that resolves to the
+  right URL; saves operators from copy-pasting URLs.
+- **Integrity / sha256 verification.** Hagezi publishes `.sha256`
+  siblings. Optional `sha256_url:` per source; the fetcher refuses to
+  swap cache if the hash mismatches.
+- **Per-source refresh intervals.** Today's global
+  `blocklists.refresh_interval` is fine when one URL dominates. Add
+  `sources[].refresh_interval:` override when a second URL has different
+  freshness needs.
+- **Configurable failure-mode policy.** Today: always fail-open. Add
+  `on_failure: {fail_open, fail_start, fail_after: 7d}` per source for
+  stricter operators.
+- **Force-refresh admin HTTP endpoint.**
+  `POST /admin/refresh-blocklists` so operators can poke without `kill
+  -HUP` capability. Needs admin-auth design first.
+- **Source types beyond `file` and `http`.** FTP, S3, `gs://`, git. Each
+  implements `Source` + (for fetched sources) provides its own fetcher;
+  the `type:` discriminator already supports it.
+- **Fetch latency histogram metric.**
+  `bns_blocklist_fetch_duration_seconds` when fetch latency becomes
+  interesting (today's 1-fetch-per-day default makes the histogram noise
+  more than signal).
+- **Default-list curation.** Revisit which list ships in the default
+  container config (currently hagezi `pro`). Consider shipping a slim
+  "ads + trackers only" list as the default and documenting `pro` as an
+  opt-in.
