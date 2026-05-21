@@ -33,6 +33,19 @@ Tracked follow-ups. Not bugs; not currently blocking. Promote to a spec/plan whe
   No regression-gate utility today — comparison is eyeball-driven. Add
   once enough baseline reports exist to make it meaningful.
 
+## Release automation
+
+- **Auto-create GitHub Release on `v*` tag push.**
+  Today `.github/workflows/docker.yml` builds + pushes the multi-arch
+  image on `v*` tags but does NOT create a matching GitHub Release —
+  done by hand via `gh release create`. Add a small job (separate
+  workflow or step in docker.yml) that runs on `push.tags: ['v*']` and
+  calls `gh release create ${{ github.ref_name }} --generate-notes`
+  using `GITHUB_TOKEN` (needs `contents: write`). Optional upgrade
+  path: replace with `goreleaser` if/when binary artefacts are wanted
+  alongside the container image (cross-compile via `goreleaser` covers
+  the same arches the Dockerfile does).
+
 ## BNS CLI surface
 
 - **Resolve scenario `@<path>` entries against a known root.**

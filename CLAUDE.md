@@ -122,7 +122,7 @@ Target: few thousand QPS on Raspberry Pi-class hardware. NOT high-scale.
 
 Import path is `codeberg.org/miekg/dns` (NO `/v2` suffix despite being v2). Field/function differences vs v1 that bit us:
 
-- `Msg.ID` (uppercase), not `Id`.
+- `Msg.ID` (uppercase), not `Id`. Note: `ID`/`Response`/`Rcode` live on embedded `MsgHeader`, NOT directly on `Msg` — `dns.Msg{Response: true}` fails to compile. Use `new(dns.Msg); m.Response = true` or `dns.Msg{MsgHeader: dns.MsgHeader{Response: true}}`.
 - Build request via `dns.NewMsg(name, qtype)`. No `req.SetQuestion(...)`.
 - Wire reply via `dnsutil.SetReply(resp, req)` from `codeberg.org/miekg/dns/dnsutil`. No `resp.SetReply(req)`.
 - Parse RR text via `dns.New(s)`, not `dns.NewRR(s)`.
@@ -149,6 +149,7 @@ Vendored offline reference: `/home/ben.guest/vendor/miekg-dns-v2/`.
 - Image: `ghcr.io/bcrisp4/bns` — multi-arch (`linux/amd64`+`linux/arm64`), `gcr.io/distroless/static-debian12:nonroot`. ~10MB.
 - Build: `deploy/docker/Dockerfile` (3 stages — hagezi-fetch on `$BUILDPLATFORM`, Go cross-compile via `GOOS/GOARCH` from `TARGETOS/TARGETARCH`, distroless runtime).
 - CI: `.github/workflows/docker.yml` — buildx multi-arch + GHCR push on `main` + `v*` tags.
+- **Git tag → image tag transform.** `docker/metadata-action` uses `pattern={{version}}`, so git tag `v0.2.0` publishes `ghcr.io/bcrisp4/bns:0.2.0` (no `v`), plus `:0.2` and `:sha-XXXXXXX`. Main pushes also publish `:latest`.
 - **Container listens `:5354`** — nonroot uid 65532 cannot bind privileged ports; distroless has no `setcap` so `CAP_NET_BIND_SERVICE` route unavailable. Host maps `-p 53:5354/udp -p 53:5354/tcp`.
 - Hagezi `pro.txt` baked at `/etc/bns/blocklists/pro.txt`, pinned via `HAGEZI_TAG` ARG in Dockerfile. Bump ARG to refresh.
 - Config baked at `/etc/bns/config.yaml` (source: `deploy/docker/config.yaml`). Override at runtime via bind-mount, `BNS_*` env vars, or trailing CLI flags after image name.
