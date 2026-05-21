@@ -43,6 +43,7 @@ upstreams:
 blocklists:
   sources:
     - type: file
+      name: yaml-list
       path: /tmp/from-yaml.txt
 `)
 	cfg := loadWithArgs(t, yaml)
@@ -59,6 +60,7 @@ upstreams:
 blocklists:
   sources:
     - type: file
+      name: yaml-list
       path: /tmp/from-yaml.txt
 `)
 	cfg := loadWithArgs(t, yaml,

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -98,7 +99,10 @@ func bindServeFlags(v *viper.Viper, c *cobra.Command) error {
 		return map[string]any{"addr": addr, "timeout": "2s"}
 	})
 	setSliceFlag(v, c, "blocklist", "blocklists.sources", func(path string) map[string]any {
-		return map[string]any{"type": "file", "path": path}
+		// Name derived from the basename so the new schema's `name` requirement
+		// is satisfied. This flag is going away in the http-source rewrite;
+		// no need to support collision-free naming here.
+		return map[string]any{"type": "file", "name": filepath.Base(path), "path": path}
 	})
 	return nil
 }
