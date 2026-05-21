@@ -6,7 +6,7 @@ File give guide to Claude Code (claude.ai/code) when work code in this repo.
 
 BNS (Ben's Name Server) — caching DNS forwarder with ad-block for small private network. Pi-hole-like. Go 1.26, module `github.com/bcrisp4/bns`, single static binary deploy on Raspberry Pi.
 
-MVP shipped to `main`. v0.1.0 release tagged 2026-05-19. Container image at `ghcr.io/bcrisp4/bns` (multi-arch amd64+arm64). 17 internal packages, full chain work end-to-end, tests race-clean. See `docs/specs/2026-05-19-bns-mvp-design.md` and `docs/plans/2026-05-19-bns-mvp-implementation.md`.
+MVP shipped to `main`. Releases: v0.1.0 (2026-05-19, MVP), v0.2.0 (container image multi-arch amd64+arm64), v0.3.0 (HTTP blocklist source with polite auto-refresh, on-disk cache, fail-open semantics). Container at `ghcr.io/bcrisp4/bns`. Tests race-clean. Specs in `docs/specs/`, plans in `docs/plans/`.
 
 ## Quickstart
 
