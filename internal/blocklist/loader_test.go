@@ -60,3 +60,23 @@ func TestLoader_AnySourceFailingFailsLoad(t *testing.T) {
 	_, _, err := ldr.Load(context.Background())
 	require.Error(t, err)
 }
+
+func TestLoader_MixesFileAndHTTPSources(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "list.txt")
+	require.NoError(t, os.WriteFile(filePath, []byte("a.example\n"), 0o644))
+
+	cacheDir := filepath.Join(dir, "cache")
+	store := blocklist.NewCacheStore(cacheDir)
+	url := "https://example.com/x.txt"
+	require.NoError(t, store.Write(url, []byte("b.example\n"), blocklist.CacheMeta{URL: url, Bytes: 10, Entries: 1}))
+
+	l := blocklist.NewLoader([]blocklist.Source{
+		blocklist.FileSource{Path: filePath},
+		blocklist.NewHTTPSource("x", url, store),
+	})
+	m, _, err := l.Load(context.Background())
+	require.NoError(t, err)
+	require.True(t, m.Match("a.example"))
+	require.True(t, m.Match("b.example"))
+}

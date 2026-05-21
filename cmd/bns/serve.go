@@ -130,13 +130,19 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	rdy := health.NewReadiness()
 	queryLog := logging.QueryLogger(cfg.Logging.QueryLog, os.Stdout)
 
+	store := blocklist.NewCacheStore(cfg.Blocklists.CacheDir)
 	sources := make([]blocklist.Source, 0, len(cfg.Blocklists.Sources))
 	for _, s := range cfg.Blocklists.Sources {
-		if s.Type != "file" {
-			return fmt.Errorf("blocklist source type %q is not supported in MVP", s.Type)
+		switch s.Type {
+		case "file":
+			sources = append(sources, blocklist.FileSource{Path: s.Path})
+		case "http":
+			sources = append(sources, blocklist.NewHTTPSource(s.Name, s.URL, store))
+		default:
+			return fmt.Errorf("blocklist source %q: unsupported type %q", s.Name, s.Type)
 		}
-		sources = append(sources, blocklist.FileSource{Path: s.Path})
 	}
+	_ = store
 	loader := blocklist.NewLoader(sources)
 	initial, count, err := loader.Load(ctx)
 	if err != nil {
