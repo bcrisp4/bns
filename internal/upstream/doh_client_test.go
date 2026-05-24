@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -148,4 +149,97 @@ func TestDoHClient_POSTMethodAndHeaders(t *testing.T) {
 	require.Equal(t, "POST", seenMethod)
 	require.Equal(t, "application/dns-message", seenCT)
 	require.Equal(t, "application/dns-message", seenAccept)
+}
+
+func TestDoHClient_HTTPNon2xx(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}
+	c := newTestDoHServer(t, handler)
+	_, err := c.Exchange(context.Background(), dns.NewMsg("example.com.", dns.TypeA))
+	require.ErrorContains(t, err, "http 500")
+}
+
+func TestDoHClient_Accepts2xxRange(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		// 202 Accepted — uncommon but spec-compliant 2xx.
+		resp := new(dns.Msg)
+		resp.Response = true
+		_ = resp.Pack()
+		w.Header().Set("Content-Type", "application/dns-message")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.Copy(w, bytes.NewReader(resp.Data))
+	}
+	c := newTestDoHServer(t, handler)
+	_, err := c.Exchange(context.Background(), dns.NewMsg("example.com.", dns.TypeA))
+	require.NoError(t, err)
+}
+
+func TestDoHClient_ContentTypeWithCharsetParameter(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		resp := new(dns.Msg)
+		resp.Response = true
+		_ = resp.Pack()
+		w.Header().Set("Content-Type", "application/dns-message; charset=utf-8")
+		_, _ = io.Copy(w, bytes.NewReader(resp.Data))
+	}
+	c := newTestDoHServer(t, handler)
+	_, err := c.Exchange(context.Background(), dns.NewMsg("example.com.", dns.TypeA))
+	require.NoError(t, err, "charset parameter must not reject valid DoH body")
+}
+
+func TestDoHClient_ContentTypeMismatch(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("not dns"))
+	}
+	c := newTestDoHServer(t, handler)
+	_, err := c.Exchange(context.Background(), dns.NewMsg("example.com.", dns.TypeA))
+	require.ErrorContains(t, err, "unexpected content-type")
+}
+
+func TestDoHClient_RefusesRedirect(t *testing.T) {
+	// Second server should never be hit.
+	var secondHits int32
+	secondCert := testutil.NewTLSCert(t, []string{"127.0.0.1"})
+	second := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		atomic.AddInt32(&secondHits, 1)
+	}))
+	second.TLS = &tls.Config{Certificates: []tls.Certificate{secondCert}}
+	second.StartTLS()
+	t.Cleanup(second.Close)
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, second.URL+"/dns-query", http.StatusFound)
+	}
+	c := newTestDoHServer(t, handler)
+	_, err := c.Exchange(context.Background(), dns.NewMsg("example.com.", dns.TypeA))
+	require.ErrorContains(t, err, "http 302")
+	require.Equal(t, int32(0), atomic.LoadInt32(&secondHits),
+		"redirect target must not be followed")
+}
+
+func TestDoHClient_BodyCapPreventsOverflow(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/dns-message")
+		// Write more than dns.MaxMsgSize (65535) bytes of garbage; the
+		// client's LimitReader caps reads at 65535 → decode fails cleanly.
+		buf := make([]byte, dns.MaxMsgSize+1024)
+		_, _ = w.Write(buf)
+	}
+	c := newTestDoHServer(t, handler)
+	_, err := c.Exchange(context.Background(), dns.NewMsg("example.com.", dns.TypeA))
+	require.Error(t, err, "oversized body must fail decode, not OOM")
+}
+
+func TestDoHClient_CookieJarIsNil(t *testing.T) {
+	c, err := NewDoHClient(
+		"https://x/dns-query",
+		[]string{"1.1.1.1"},
+		5*time.Second,
+		slog.New(slog.DiscardHandler),
+		metrics.NewForTest(),
+	)
+	require.NoError(t, err)
+	require.Nil(t, c.httpClient.Jar)
 }
