@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"sync/atomic"
 	"testing"
@@ -19,6 +20,7 @@ import (
 
 	"codeberg.org/miekg/dns"
 	"codeberg.org/miekg/dns/dnshttp"
+	"codeberg.org/miekg/dns/rdata"
 	"github.com/bcrisp4/bns/internal/metrics"
 	"github.com/bcrisp4/bns/internal/upstream/testutil"
 	"github.com/stretchr/testify/require"
@@ -242,4 +244,69 @@ func TestDoHClient_CookieJarIsNil(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Nil(t, c.httpClient.Jar)
+}
+
+// buildAnswerMsg returns a DoH-style response with one A record at TTL.
+func buildAnswerMsg(req *dns.Msg, ttl uint32) *dns.Msg {
+	resp := new(dns.Msg)
+	resp.Response = true
+	resp.Question = req.Question
+	a := &dns.A{
+		Hdr: dns.Header{Name: "example.com.", TTL: ttl},
+		A:   rdata.A{Addr: netip.MustParseAddr("203.0.113.1")},
+	}
+	resp.Answer = []dns.RR{a}
+	return resp
+}
+
+func TestDoHClient_AgeHeaderDecrementsTTL(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		req, err := dnshttp.Request(r)
+		require.NoError(t, err)
+		resp := buildAnswerMsg(req, 300)
+		require.NoError(t, resp.Pack())
+		w.Header().Set("Content-Type", "application/dns-message")
+		w.Header().Set("Age", "60")
+		_, _ = io.Copy(w, bytes.NewReader(resp.Data))
+	}
+	c := newTestDoHServer(t, handler)
+
+	resp, err := c.Exchange(context.Background(), dns.NewMsg("example.com.", dns.TypeA))
+	require.NoError(t, err)
+	require.Len(t, resp.Answer, 1)
+	require.Equal(t, uint32(240), resp.Answer[0].Header().TTL)
+}
+
+func TestDoHClient_NoAgeHeader_TTLUnchanged(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		req, err := dnshttp.Request(r)
+		require.NoError(t, err)
+		resp := buildAnswerMsg(req, 300)
+		require.NoError(t, resp.Pack())
+		w.Header().Set("Content-Type", "application/dns-message")
+		// No Age header.
+		_, _ = io.Copy(w, bytes.NewReader(resp.Data))
+	}
+	c := newTestDoHServer(t, handler)
+
+	resp, err := c.Exchange(context.Background(), dns.NewMsg("example.com.", dns.TypeA))
+	require.NoError(t, err)
+	require.Equal(t, uint32(300), resp.Answer[0].Header().TTL)
+}
+
+func TestDoHClient_AgeExceedsTTL_FloorsAtZero(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		req, err := dnshttp.Request(r)
+		require.NoError(t, err)
+		resp := buildAnswerMsg(req, 30)
+		require.NoError(t, resp.Pack())
+		w.Header().Set("Content-Type", "application/dns-message")
+		w.Header().Set("Age", "120")
+		_, _ = io.Copy(w, bytes.NewReader(resp.Data))
+	}
+	c := newTestDoHServer(t, handler)
+
+	resp, err := c.Exchange(context.Background(), dns.NewMsg("example.com.", dns.TypeA))
+	require.NoError(t, err)
+	require.Equal(t, uint32(0), resp.Answer[0].Header().TTL)
 }

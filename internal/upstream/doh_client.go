@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -182,6 +183,52 @@ func (c *DoHClient) Exchange(ctx context.Context, req *dns.Msg) (*dns.Msg, error
 	if err != nil {
 		return nil, fmt.Errorf("doh %s: decode: %w", c.url, err)
 	}
+
+	// RFC 8484 §5.1: subtract HTTP Age (HTTP intermediate cache hold time)
+	// from RR TTLs so downstream caching reflects true remaining freshness.
+	// See decrementTTLs for full explanation.
+	if ageStr := resp.Header.Get("Age"); ageStr != "" {
+		if age, parseErr := strconv.ParseUint(ageStr, 10, 32); parseErr == nil && age > 0 {
+			decrementTTLs(msg, uint32(age))
+		}
+	}
+
 	msg.ID = origID // restore so downstream stages + wire writer match req
 	return msg, nil
+}
+
+// decrementTTLs subtracts age (seconds) from every Answer/Ns/Extra RR
+// TTL in m, flooring at 0.
+//
+// Why this matters (RFC 8484 §5.1):
+// HTTP Age (RFC 7234 §5.1) reports how long an HTTP intermediate cache
+// has held the response since the origin generated it. DNS RR TTLs in
+// the wire body reflect remaining-TTL when the response reached the
+// intermediate, NOT when it reached BNS. Without this adjustment,
+// downstream caching overstates remaining freshness by Age seconds and
+// serves stale answers.
+//
+// Worked example: authoritative TTL=300s.
+//
+//	T=0    Auth emits msg{TTL=300}.
+//	T=60   Origin DoH server emits msg{TTL=240} (decremented its 60s hold).
+//	T=90   Reaches HTTP intermediate cache.
+//	T=120  BNS queries → CDN returns body{TTL=240} + Age:30.
+//
+// Without subtraction: BNS caches TTL=240, expires at T=360 (60s late).
+// With subtraction:    BNS caches TTL=210, expires at T=330 (correct).
+//
+// Direct connections to public DoH providers usually have no intermediate
+// cache → Age absent → this is a no-op. Defensive correctness for the
+// CDN-fronted case at ~6 LOC.
+func decrementTTLs(m *dns.Msg, age uint32) {
+	for _, sec := range [][]dns.RR{m.Answer, m.Ns, m.Extra} {
+		for _, rr := range sec {
+			if rr.Header().TTL > age {
+				rr.Header().TTL -= age
+			} else {
+				rr.Header().TTL = 0
+			}
+		}
+	}
 }
