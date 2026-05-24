@@ -5,20 +5,27 @@
 package upstream
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"codeberg.org/miekg/dns"
+	"codeberg.org/miekg/dns/dnshttp"
 	"github.com/bcrisp4/bns/internal/metrics"
 	"golang.org/x/net/http2"
 )
+
+const dohContentType = "application/dns-message"
 
 // DoHClient sends DNS queries over HTTPS to a configured DoH endpoint.
 type DoHClient struct {
@@ -121,7 +128,60 @@ func (c *DoHClient) Name() string { return c.url }
 // Protocol returns "doh".
 func (c *DoHClient) Protocol() string { return "doh" }
 
-// Exchange is implemented in a later commit.
+// Exchange sends req to the DoH endpoint and returns the decoded response.
+//
+// RFC 8484 §4.1.1: the DNS message ID is set to 0 on the wire so HTTP caches
+// don't fragment on per-query IDs. The caller's original ID is saved via defer
+// and restored on every return path, preserving the Upstream "MUST NOT mutate
+// req" contract.
 func (c *DoHClient) Exchange(ctx context.Context, req *dns.Msg) (*dns.Msg, error) {
-	return nil, fmt.Errorf("doh %s: Exchange not yet implemented", c.url)
+	// RFC 8484 §4.1.1: DNS ID SHOULD be 0 on the wire so HTTP caches
+	// don't fragment on per-query IDs. Save+restore the caller's ID via
+	// defer so the Upstream "MUST NOT mutate req" contract holds on
+	// every return path.
+	origID := req.ID
+	req.ID = 0
+	defer func() { req.ID = origID }()
+
+	if err := req.Pack(); err != nil {
+		return nil, fmt.Errorf("doh %s: pack: %w", c.url, err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, c.url, bytes.NewReader(req.Data),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("doh %s: build request: %w", c.url, err)
+	}
+	httpReq.Header.Set("Content-Type", dohContentType)
+	httpReq.Header.Set("Accept", dohContentType)
+	httpReq.Header.Set("User-Agent", "bns")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("doh %s: do: %w", c.url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("doh %s: http %d", c.url, resp.StatusCode)
+	}
+
+	// RFC 8484 §4.2 + RFC 7231 §3.1.1.1: case-insensitive type token,
+	// parameters (e.g. charset=utf-8) permitted.
+	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || !strings.EqualFold(mediaType, dohContentType) {
+		return nil, fmt.Errorf("doh %s: unexpected content-type %q",
+			c.url, resp.Header.Get("Content-Type"))
+	}
+
+	// RFC 8484 §6 + DoS defense: cap body at the DNS msg size ceiling.
+	resp.Body = io.NopCloser(io.LimitReader(resp.Body, dns.MaxMsgSize))
+
+	msg, err := dnshttp.Response(resp)
+	if err != nil {
+		return nil, fmt.Errorf("doh %s: decode: %w", c.url, err)
+	}
+	msg.ID = origID // restore so downstream stages + wire writer match req
+	return msg, nil
 }
