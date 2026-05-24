@@ -58,7 +58,6 @@ func TestHTTPBlocklistSource_FetchThenBlock(t *testing.T) {
 
 	pool := upstream.NewPool(
 		[]upstream.Upstream{upstream.NewUDPClient(upstreamAddr, time.Second)},
-		[]string{upstreamAddr},
 		mtr,
 	)
 

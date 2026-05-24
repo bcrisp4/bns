@@ -52,13 +52,13 @@ func New(reg prometheus.Registerer) *Metrics {
 		}, []string{"outcome"}),
 		UpstreamQueriesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "bns_upstream_queries_total",
-			Help: "Total upstream queries, by upstream and outcome.",
-		}, []string{"upstream", "outcome"}),
+			Help: "Total upstream queries, by upstream, protocol and outcome.",
+		}, []string{"upstream", "protocol", "outcome"}),
 		UpstreamDurationSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "bns_upstream_duration_seconds",
-			Help:    "Upstream exchange duration in seconds, by upstream.",
+			Help:    "Upstream exchange duration in seconds, by upstream and protocol.",
 			Buckets: prometheus.DefBuckets,
-		}, []string{"upstream"}),
+		}, []string{"upstream", "protocol"}),
 		CacheEntries: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "bns_cache_entries", Help: "Current number of entries in the cache.",
 		}),

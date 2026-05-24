@@ -75,3 +75,12 @@ func ClientInfoFrom(ctx context.Context) (ClientInfo, bool) {
 	v, ok := ctx.Value(clientInfoKey{}).(ClientInfo)
 	return v, ok
 }
+
+// MarkUpstream is a placeholder added in this task to keep the tree
+// compiling. The real implementation lands in Task 4 (UpstreamInfo
+// ctx-marker triad). DO NOT add new callers beyond Pool.Exchange.
+func MarkUpstream(ctx context.Context, name, protocol string) {
+	_ = ctx
+	_ = name
+	_ = protocol
+}
