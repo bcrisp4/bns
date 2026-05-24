@@ -68,7 +68,7 @@ func New(reg prometheus.Registerer) *Metrics {
 			Name: "bns_cache_capacity", Help: "Configured maximum cache entries.",
 		}),
 		CacheEvictionsTotal: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "bns_cache_evictions_total", Help: "Cache evictions (LRU pressure).",
+			Name: "bns_cache_evictions_total", Help: "Cache evictions (LRU pressure or lazy TTL expiry on Get).",
 		}),
 		BlocklistEntries: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "bns_blocklist_entries", Help: "Distinct FQDNs in the active blocklist.",
