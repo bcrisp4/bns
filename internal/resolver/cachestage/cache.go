@@ -18,6 +18,7 @@ import (
 	"codeberg.org/miekg/dns"
 	"github.com/bcrisp4/bns/internal/cache"
 	"github.com/bcrisp4/bns/internal/config"
+	"github.com/bcrisp4/bns/internal/metrics"
 	"github.com/bcrisp4/bns/internal/resolver"
 )
 
@@ -25,11 +26,20 @@ type stage struct {
 	next  resolver.Resolver
 	store *cache.LRU
 	cfg   config.Cache
+	m     *metrics.Metrics // nil → no metrics
 }
 
 // New wraps next with a cache stage backed by store, governed by cfg.
-func New(next resolver.Resolver, store *cache.LRU, cfg config.Cache) resolver.Resolver {
-	return &stage{next: next, store: store, cfg: cfg}
+// m may be nil, in which case no metrics are recorded.
+func New(next resolver.Resolver, store *cache.LRU, cfg config.Cache, m *metrics.Metrics) resolver.Resolver {
+	return &stage{next: next, store: store, cfg: cfg, m: m}
+}
+
+func (s *stage) recordLookup(result string) {
+	if s.m == nil {
+		return
+	}
+	s.m.CacheLookupsTotal.WithLabelValues(result).Inc()
 }
 
 // Resolve checks the cache for a stored answer. On a miss it delegates to
@@ -44,9 +54,11 @@ func (s *stage) Resolve(ctx context.Context, req *dns.Msg) (*dns.Msg, error) {
 
 	// Cache hit: stamp the caller's ID and return the deep-copied entry.
 	if resp, ok := s.store.Get(key); ok {
+		s.recordLookup("hit")
 		resp.ID = req.ID
 		return resp, nil
 	}
+	s.recordLookup("miss")
 
 	resp, err := s.next.Resolve(ctx, req)
 	if err != nil {

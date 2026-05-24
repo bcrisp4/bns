@@ -36,7 +36,7 @@ type Deps struct {
 func Build(d Deps) resolver.Resolver {
 	r := forward.New(d.Upstream)
 	r = coalesce.New(r, d.Metrics)
-	r = cachestage.New(r, d.Cache, d.CacheCfg)
+	r = cachestage.New(r, d.Cache, d.CacheCfg, d.Metrics)
 	r = blockstage.New(r, d.Blocklist)
 	r = qlog.New(r, d.QueryLog)
 	r = metricstage.New(r, d.Metrics)

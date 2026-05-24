@@ -26,6 +26,7 @@ type Metrics struct {
 	CacheEntries                  prometheus.Gauge
 	CacheCapacity                 prometheus.Gauge
 	CacheEvictionsTotal           prometheus.Counter
+	CacheLookupsTotal             *prometheus.CounterVec
 	BlocklistEntries              prometheus.Gauge
 	BlocklistLoadedTimestamp      prometheus.Gauge
 	BlocklistReloadsTotal         *prometheus.CounterVec
@@ -70,6 +71,10 @@ func New(reg prometheus.Registerer) *Metrics {
 		CacheEvictionsTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "bns_cache_evictions_total", Help: "Cache evictions (LRU pressure or lazy TTL expiry on Get).",
 		}),
+		CacheLookupsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "bns_cache_lookups_total",
+			Help: "Cache lookups in cachestage, by result (hit|miss).",
+		}, []string{"result"}),
 		BlocklistEntries: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "bns_blocklist_entries", Help: "Distinct FQDNs in the active blocklist.",
 		}),
@@ -113,7 +118,7 @@ func New(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(
 		m.QueriesTotal, m.QueryDurationSeconds,
 		m.UpstreamQueriesTotal, m.UpstreamDurationSeconds,
-		m.CacheEntries, m.CacheCapacity, m.CacheEvictionsTotal,
+		m.CacheEntries, m.CacheCapacity, m.CacheEvictionsTotal, m.CacheLookupsTotal,
 		m.BlocklistEntries, m.BlocklistLoadedTimestamp, m.BlocklistReloadsTotal,
 		m.CoalescedQueriesTotal, m.PanicsTotal,
 		m.BlocklistFetchTotal, m.BlocklistLastSuccessTimestamp, m.BlocklistEntriesBySource,
@@ -131,6 +136,9 @@ func New(reg prometheus.Registerer) *Metrics {
 	// metric stage.
 	for _, outcome := range []string{"blocked", "error", "forwarded", "nxdomain"} {
 		m.QueryDurationSeconds.WithLabelValues(outcome)
+	}
+	for _, result := range []string{"hit", "miss"} {
+		m.CacheLookupsTotal.WithLabelValues(result)
 	}
 
 	return m

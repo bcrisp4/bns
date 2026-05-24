@@ -11,8 +11,10 @@ import (
 	"codeberg.org/miekg/dns/rdata"
 	"github.com/bcrisp4/bns/internal/cache"
 	"github.com/bcrisp4/bns/internal/config"
+	"github.com/bcrisp4/bns/internal/metrics"
 	"github.com/bcrisp4/bns/internal/resolver"
 	"github.com/bcrisp4/bns/internal/resolver/cachestage"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,7 +51,7 @@ func TestCacheStage_MissThenHit(t *testing.T) {
 		return answer(req.Question[0].Header().Name, 300, "1.2.3.4"), nil
 	})
 
-	r := cachestage.New(next, cache.NewLRU(10), defaults())
+	r := cachestage.New(next, cache.NewLRU(10), defaults(), nil)
 
 	req := dns.NewMsg("example.com.", dns.TypeA)
 
@@ -75,11 +77,34 @@ func TestCacheStage_NXDomainNegativeCachedWithSOAMin(t *testing.T) {
 	})
 
 	lru := cache.NewLRU(10)
-	r := cachestage.New(next, lru, defaults())
+	r := cachestage.New(next, lru, defaults(), nil)
 
 	req := dns.NewMsg("nx.example.com.", dns.TypeA)
 	resp, err := r.Resolve(context.Background(), req)
 	require.NoError(t, err)
 	require.Equal(t, uint16(dns.RcodeNameError), resp.Rcode)
 	require.Equal(t, 1, lru.Len(), "negative response should be cached")
+}
+
+func TestCacheStage_LookupsCounter(t *testing.T) {
+	m := metrics.NewForTest()
+
+	next := resolver.ResolverFunc(func(_ context.Context, req *dns.Msg) (*dns.Msg, error) {
+		return answer(req.Question[0].Header().Name, 300, "1.2.3.4"), nil
+	})
+	r := cachestage.New(next, cache.NewLRU(10), defaults(), m)
+
+	req := dns.NewMsg("example.com.", dns.TypeA)
+
+	// First call: miss (cache empty), populates cache.
+	_, err := r.Resolve(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, 1.0, testutil.ToFloat64(m.CacheLookupsTotal.WithLabelValues("miss")))
+	require.Equal(t, 0.0, testutil.ToFloat64(m.CacheLookupsTotal.WithLabelValues("hit")))
+
+	// Second call: hit.
+	_, err = r.Resolve(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, 1.0, testutil.ToFloat64(m.CacheLookupsTotal.WithLabelValues("miss")))
+	require.Equal(t, 1.0, testutil.ToFloat64(m.CacheLookupsTotal.WithLabelValues("hit")))
 }
