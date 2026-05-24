@@ -100,6 +100,35 @@ func (c Config) Validate() error {
 			return fmt.Errorf("blocklists.sources[%d] (%s): type %q must be file or http", i, s.Name, s.Type)
 		}
 	}
+	// Cross-field: when any http blocklist source is configured, ensure
+	// upstream config yields at least one bootstrap address for the
+	// blocklist fetcher (UDP addr OR DoH endpoint_ips paired with :53).
+	// Today this is automatically satisfied — UDP requires Addr, DoH
+	// requires non-empty EndpointIPs — so this is defensive against future
+	// schema changes (e.g. an upstream type with no dial address).
+	hasHTTPBlocklist := false
+	for _, s := range c.Blocklists.Sources {
+		if s.Type == "http" {
+			hasHTTPBlocklist = true
+			break
+		}
+	}
+	if hasHTTPBlocklist {
+		bootstrap := 0
+		for _, u := range c.Upstreams {
+			switch u.Type {
+			case "", "udp":
+				if u.Addr != "" {
+					bootstrap++
+				}
+			case "doh":
+				bootstrap += len(u.EndpointIPs)
+			}
+		}
+		if bootstrap == 0 {
+			return errors.New("blocklists.sources contains type=http but upstream config yields no bootstrap IPs")
+		}
+	}
 	return nil
 }
 

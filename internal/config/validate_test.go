@@ -216,3 +216,50 @@ func TestValidate_UnknownType(t *testing.T) {
 	}
 	require.ErrorContains(t, c.Validate(), "must be \"udp\" or \"doh\"")
 }
+
+func TestValidate_HTTPBlocklist_RequiresBootstrapIPs(t *testing.T) {
+	// DoH-only config with file-only blocklist source: no http source,
+	// so no bootstrap needed → passes even though there are zero UDP
+	// upstreams.
+	c := minimalValidConfig()
+	c.Upstreams = []config.Upstream{
+		{
+			Type:        "doh",
+			URL:         "https://cloudflare-dns.com/dns-query",
+			EndpointIPs: []string{"1.1.1.1"},
+			Timeout:     5 * time.Second,
+		},
+	}
+	c.Blocklists.Sources = []config.BlocklistSource{
+		{Type: "file", Name: "local", Path: "/dev/null"},
+	}
+	require.NoError(t, c.Validate())
+}
+
+func TestValidate_HTTPBlocklist_WithUDPUpstream_OK(t *testing.T) {
+	c := minimalValidConfig()
+	c.Upstreams = []config.Upstream{
+		{Type: "udp", Addr: "1.1.1.1:53", Timeout: 2 * time.Second},
+	}
+	c.Blocklists.Sources = []config.BlocklistSource{
+		{Type: "http", Name: "hagezi-pro", URL: "https://x/y"},
+	}
+	require.NoError(t, c.Validate())
+}
+
+func TestValidate_HTTPBlocklist_WithDoHEndpointIPs_OK(t *testing.T) {
+	c := minimalValidConfig()
+	c.Upstreams = []config.Upstream{
+		{
+			Type:        "doh",
+			URL:         "https://cloudflare-dns.com/dns-query",
+			EndpointIPs: []string{"1.1.1.1"},
+			Timeout:     5 * time.Second,
+		},
+	}
+	c.Blocklists.Sources = []config.BlocklistSource{
+		{Type: "http", Name: "hagezi-pro", URL: "https://x/y"},
+	}
+	// DoH endpoint_ips serve as bootstrap-IP source (paired with :53).
+	require.NoError(t, c.Validate())
+}
