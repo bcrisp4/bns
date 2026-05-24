@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -309,4 +310,47 @@ func TestDoHClient_AgeExceedsTTL_FloorsAtZero(t *testing.T) {
 	resp, err := c.Exchange(context.Background(), dns.NewMsg("example.com.", dns.TypeA))
 	require.NoError(t, err)
 	require.Equal(t, uint32(0), resp.Answer[0].Header().TTL)
+}
+
+func TestDoHClient_ContextCancellation(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		// Block until client disconnects.
+		<-r.Context().Done()
+	}
+	c := newTestDoHServer(t, handler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel
+	_, err := c.Exchange(ctx, dns.NewMsg("example.com.", dns.TypeA))
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+// TestDoHClient_PackError_RestoresOriginalID verifies that the deferred ID
+// restore in Exchange runs even when req.Pack() fails, preserving the caller's
+// req.ID on every return path.
+//
+// Pack fails when a DNS label is >= 64 bytes (miekg/dns v2 internal/pack/pack.go:
+// "labelLen >= 1<<6" returns "illegal label type in name"). A 64-char label is a
+// reliable, version-stable trigger.
+func TestDoHClient_PackError_RestoresOriginalID(t *testing.T) {
+	// Construct a Msg whose question name has a 64-char label — Pack rejects it
+	// with "illegal label type in name" before any network I/O.
+	label64 := strings.Repeat("a", 64)
+	req := dns.NewMsg(label64+".example.com.", dns.TypeA)
+	req.ID = 0xBEEF
+
+	c, err := NewDoHClient(
+		"https://x/dns-query",
+		[]string{"127.0.0.1"},
+		5*time.Second,
+		slog.New(slog.DiscardHandler),
+		metrics.NewForTest(),
+	)
+	require.NoError(t, err)
+
+	_, exErr := c.Exchange(context.Background(), req)
+	require.Error(t, exErr)
+	require.Equal(t, uint16(0xBEEF), req.ID,
+		"caller's req.ID must be restored even on Pack failure")
 }
