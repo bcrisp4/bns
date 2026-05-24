@@ -6,7 +6,7 @@ File guide Claude Code (claude.ai/code) when work code this repo.
 
 BNS (Ben's Name Server) — caching DNS forwarder with ad-block for small private network. Pi-hole-like. Go 1.26, module `github.com/bcrisp4/bns`, single static binary deploy on Raspberry Pi.
 
-MVP shipped to `main`. Releases: v0.1.0 (2026-05-19, MVP), v0.2.0 (container image multi-arch amd64+arm64), v0.3.0 (HTTP blocklist source with polite auto-refresh, on-disk cache, fail-open semantics). Container at `ghcr.io/bcrisp4/bns`. Tests race-clean. Specs in `docs/specs/`, plans in `docs/plans/`.
+MVP shipped to `main`. Releases: v0.1.0 (2026-05-19, MVP), v0.2.0 (container image multi-arch amd64+arm64), v0.3.0 (HTTP blocklist source with polite auto-refresh, on-disk cache, fail-open semantics), v0.4.0 (2026-05-24, DoH upstream with operator-pinned endpoint_ips, RFC 8484 compliant, per-query upstream attribution in qlog). Container at `ghcr.io/bcrisp4/bns`. Tests race-clean. Specs in `docs/specs/`, plans in `docs/plans/`.
 
 ## Quickstart
 
@@ -173,6 +173,7 @@ Vendored offline reference: `/home/ben.guest/vendor/miekg-dns-v2/`.
 - `make vet` — go vet
 - `make lint` — golangci-lint (NOT installed locally; CI only)
 - `make tidy` — go mod tidy
+- `make build-stress` — `bin/bns-stress` orchestrator (see Stress harness section)
 
 Test helpers: `metrics.NewForTest()` returns a `*Metrics` registered to a fresh `prometheus.NewRegistry()` — use in any unit test that needs to construct `*Metrics` without polluting the default registerer. `internal/upstream/testutil.NewTLSCert(t, hosts)` generates a self-signed cert with mixed DNS / IP SANs (split via `net.ParseIP`); pair with `httptest.NewUnstartedServer` + `srv.TLS.Certificates` + `StartTLS()` for any DoH/h2 test.
 
@@ -192,21 +193,9 @@ Test helpers: `metrics.NewForTest()` returns a `*Metrics` registered to a fresh 
 - **Discard logger idiom** — use `slog.New(slog.DiscardHandler)` (Go 1.24+), not `slog.New(slog.NewTextHandler(io.Discard, nil))`. Latter still allocates and calls `Enabled` before dropping.
 - **Don't set `Accept-Encoding: gzip` on outgoing requests** unless also wrap response with `gzip.NewReader`. Stdlib `net/http` Transport only does transparent decompression when caller does NOT set header explicitly. Setting once silently disables decode and hands raw gzip bytes back.
 - **Run `find . -name '*.go' -not -path '*/vendor/*' | xargs gofmt -l` before commit** — `make lint` is CI-only but gofmt local. Catches whitespace/alignment drift cheaply.
-- **DoH upstreams require `endpoint_ips`** — operator-pinned IPs. BNS never resolves
-  the DoH URL hostname at runtime (would deadlock through itself on Pi-hole-style
-  deployments). The hostname is used only for SNI + cert validation.
-- **`--upstream` CLI flag removed.** Upstreams are YAML-only (matches `blocklists.sources`,
-  which has been YAML-only since HTTP source landed because viper can't index slice
-  config via env vars).
-- **Blocklist fetcher reuses DoH `endpoint_ips` as bootstrap DNS targets paired with `:53`.**
-  Assumes the same IPs serving DoH on `:443` also serve plain UDP/TCP DNS on `:53` — true
-  for every major public provider, documented limitation for self-hosted DoH-only
-  endpoints (see `docs/TODO.md`).
-- **httptest TLS servers need explicit `NextProtos: []string{"h2", "http/1.1"}`** on
-  `srv.TLS` before `StartTLS()`. Without it, the stdlib TLS handshake offers no ALPN
-  protocols and the client silently falls back to HTTP/1.1 — tests for h2-specific
-  behaviour (multiplexing, push refusal) become no-ops. miekg/dns v2's `dnshttp` pkg
-  doc carries the same warning.
+- **DoH upstreams require operator-pinned `endpoint_ips`.** BNS never resolves DoH URL hostname at runtime — would deadlock through itself on Pi-hole-style deployments. Hostname used for SNI + cert SAN only.
+- **Blocklist fetcher reuses DoH `endpoint_ips` as bootstrap DNS targets paired with `:53`.** Assumes same IPs serving DoH on `:443` also serve plain UDP/TCP DNS on `:53` — true for major public providers, breaks for self-hosted DoH-only (see `docs/TODO.md`).
+- **httptest TLS h2 needs `NextProtos: []string{"h2","http/1.1"}`** on `srv.TLS` before `StartTLS()`. Without, ALPN offers nothing, client falls back to HTTP/1.1 silently — h2 tests (multiplexing, push refusal) become no-ops.
 
 ## Stress harness
 
