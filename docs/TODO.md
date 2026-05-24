@@ -56,6 +56,23 @@ Tracked follow-ups. Not bugs; not currently blocking. Promote to a spec/plan whe
   open error. Either resolve relative to the binary or embed the
   queries with `embed.FS` (and let scenarios choose).
 
+## DoH upstream (2026-05-24-doh-upstream)
+
+- **Decouple blocklist bootstrap from DoH `endpoint_ips`.**
+  The DoH upstream spec aggregates blocklist-fetcher bootstrap IPs from
+  UDP upstream `addr` host parts plus DoH `endpoint_ips` paired with
+  `:53`. That works for the major public providers (Cloudflare, Google,
+  Quad9, AdGuard, NextDNS, Mullvad) whose DoH endpoint IPs also serve
+  plain UDP/TCP DNS on `:53`, but it breaks for self-hosted DoH-only
+  endpoints or providers that don't run a `:53` service. Pick this up
+  when a real user hits the assumption or when self-hosted DoH support
+  becomes a goal. Likely direction: a top-level `bootstrap_addrs:` list
+  decoupled from upstream config so DoH `endpoint_ips` no longer have to
+  double as plain-DNS bootstrap targets. Pinning blocklist endpoint IPs
+  per source is NOT a viable answer — blocklist URLs are typically served
+  from CDNs (GitHub Pages/Fastly for hagezi, Cloudflare for others) whose
+  IP ranges shift, so per-source pinning would silently rot.
+
 ## Blocklist source extensions (2026-05-21-bns-http-blocklist-source)
 
 Deferred from the HTTP-blocklist-source spec (§10). Each is independently
