@@ -14,6 +14,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strconv"
 	"strings"
@@ -158,11 +159,36 @@ func (c *DoHClient) Exchange(ctx context.Context, req *dns.Msg) (*dns.Msg, error
 	httpReq.Header.Set("Accept", dohContentType)
 	httpReq.Header.Set("User-Agent", "bns")
 
+	// httptrace: log cold connections (debug-level to avoid log spam) and
+	// record TLS handshake outcomes so ops can detect connection churn.
+	trace := &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
+			if !info.Reused {
+				c.logger.Debug("doh new connection",
+					"upstream", c.url,
+					"addr", info.Conn.RemoteAddr().String(),
+				)
+			}
+		},
+		TLSHandshakeDone: func(_ tls.ConnectionState, hsErr error) {
+			result := "ok"
+			if hsErr != nil {
+				result = "error"
+			}
+			c.metrics.DoHTLSHandshakesTotal.WithLabelValues(c.url, result).Inc()
+		},
+	}
+	httpReq = httpReq.WithContext(httptrace.WithClientTrace(httpReq.Context(), trace))
+
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("doh %s: do: %w", c.url, err)
 	}
 	defer resp.Body.Close()
+
+	// Record HTTP status regardless of whether it's 2xx — non-2xx responses
+	// are useful diagnostic signals (e.g. 429 rate-limit, 503 overload).
+	c.metrics.DoHHTTPStatusTotal.WithLabelValues(c.url, strconv.Itoa(resp.StatusCode)).Inc()
 
 	if resp.StatusCode/100 != 2 {
 		return nil, fmt.Errorf("doh %s: http %d", c.url, resp.StatusCode)

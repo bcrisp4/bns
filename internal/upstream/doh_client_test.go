@@ -25,6 +25,7 @@ import (
 	"codeberg.org/miekg/dns/rdata"
 	"github.com/bcrisp4/bns/internal/metrics"
 	"github.com/bcrisp4/bns/internal/upstream/testutil"
+	ptestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -52,11 +53,12 @@ func TestDoHClient_InvalidURL(t *testing.T) {
 	require.Error(t, err)
 }
 
-// newTestDoHServer spins up an httptest TLS server with a self-signed
-// cert covering 127.0.0.1, running the supplied handler. Returns a fully
-// configured DoHClient pointing at it (test cert pool injected into the
-// client's TLS config).
-func newTestDoHServer(t *testing.T, handler http.HandlerFunc) *DoHClient {
+// newTestDoHServerWithMetrics spins up an httptest TLS server with a
+// self-signed cert covering 127.0.0.1, running the supplied handler.
+// Returns a fully configured DoHClient pointing at it (test cert pool
+// injected into the client's TLS config), using the supplied *metrics.Metrics
+// so callers can assert counter values via prometheus/testutil.
+func newTestDoHServerWithMetrics(t *testing.T, handler http.HandlerFunc, mtr *metrics.Metrics) *DoHClient {
 	t.Helper()
 
 	cert := testutil.NewTLSCert(t, []string{"127.0.0.1"})
@@ -77,7 +79,7 @@ func newTestDoHServer(t *testing.T, handler http.HandlerFunc) *DoHClient {
 		nil, // empty endpointIPs → DialContext falls back to URL host (127.0.0.1)
 		5*time.Second,
 		slog.New(slog.DiscardHandler),
-		metrics.NewForTest(),
+		mtr,
 	)
 	require.NoError(t, err)
 
@@ -86,6 +88,13 @@ func newTestDoHServer(t *testing.T, handler http.HandlerFunc) *DoHClient {
 	c.httpClient.Transport.(*http.Transport).TLSClientConfig.RootCAs = pool
 
 	return c
+}
+
+// newTestDoHServer is a convenience wrapper around newTestDoHServerWithMetrics
+// for tests that don't need to assert metric counter values.
+func newTestDoHServer(t *testing.T, handler http.HandlerFunc) *DoHClient {
+	t.Helper()
+	return newTestDoHServerWithMetrics(t, handler, metrics.NewForTest())
 }
 
 // dohEchoHandler decodes the DoH request to a DNS message, hands it to
@@ -396,4 +405,40 @@ func TestDoHClient_DialFailover(t *testing.T) {
 
 	_, err = c.Exchange(context.Background(), dns.NewMsg("example.com.", dns.TypeA))
 	require.NoError(t, err, "dial should have failed over from 127.0.0.99 to 127.0.0.1")
+}
+
+func TestDoHClient_RecordsHTTPStatusMetric(t *testing.T) {
+	mtr := metrics.NewForTest()
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		resp := new(dns.Msg)
+		resp.Response = true
+		_ = resp.Pack()
+		w.Header().Set("Content-Type", "application/dns-message")
+		_, _ = io.Copy(w, bytes.NewReader(resp.Data))
+	}
+	c := newTestDoHServerWithMetrics(t, handler, mtr)
+
+	_, err := c.Exchange(context.Background(), dns.NewMsg("example.com.", dns.TypeA))
+	require.NoError(t, err)
+
+	count := ptestutil.ToFloat64(mtr.DoHHTTPStatusTotal.WithLabelValues(c.url, "200"))
+	require.Equal(t, float64(1), count)
+}
+
+func TestDoHClient_RecordsTLSHandshakeMetric(t *testing.T) {
+	mtr := metrics.NewForTest()
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		resp := new(dns.Msg)
+		resp.Response = true
+		_ = resp.Pack()
+		w.Header().Set("Content-Type", "application/dns-message")
+		_, _ = io.Copy(w, bytes.NewReader(resp.Data))
+	}
+	c := newTestDoHServerWithMetrics(t, handler, mtr)
+
+	_, err := c.Exchange(context.Background(), dns.NewMsg("example.com.", dns.TypeA))
+	require.NoError(t, err)
+
+	count := ptestutil.ToFloat64(mtr.DoHTLSHandshakesTotal.WithLabelValues(c.url, "ok"))
+	require.GreaterOrEqual(t, count, float64(1))
 }
