@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -353,4 +354,46 @@ func TestDoHClient_PackError_RestoresOriginalID(t *testing.T) {
 	require.Error(t, exErr)
 	require.Equal(t, uint16(0xBEEF), req.ID,
 		"caller's req.ID must be restored even on Pack failure")
+}
+
+func TestDoHClient_DialFailover(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		resp := new(dns.Msg)
+		resp.Response = true
+		_ = resp.Pack()
+		w.Header().Set("Content-Type", "application/dns-message")
+		_, _ = io.Copy(w, bytes.NewReader(resp.Data))
+	}
+
+	cert := testutil.NewTLSCert(t, []string{"127.0.0.1"})
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(handler))
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{cert}}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+
+	parsed, _ := url.Parse(srv.URL)
+	_, port, _ := net.SplitHostPort(parsed.Host)
+
+	// dohURL host is the test server's host:port pair so the URL parser
+	// gives us the correct port to dial on the unreachable IP as well.
+	dohURL := "https://127.0.0.1:" + port + "/dns-query"
+
+	// Endpoint IPs: first one is unreachable (127.0.0.99 — nothing
+	// listens on the ephemeral test port there); second is the actual
+	// server.
+	c, err := NewDoHClient(
+		dohURL,
+		[]string{"127.0.0.99", "127.0.0.1"},
+		2*time.Second,
+		slog.New(slog.DiscardHandler),
+		metrics.NewForTest(),
+	)
+	require.NoError(t, err)
+
+	pool := x509.NewCertPool()
+	pool.AddCert(cert.Leaf)
+	c.httpClient.Transport.(*http.Transport).TLSClientConfig.RootCAs = pool
+
+	_, err = c.Exchange(context.Background(), dns.NewMsg("example.com.", dns.TypeA))
+	require.NoError(t, err, "dial should have failed over from 127.0.0.99 to 127.0.0.1")
 }
