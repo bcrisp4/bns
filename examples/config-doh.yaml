@@ -1,0 +1,28 @@
+listen:
+  udp: 127.0.0.1:5354
+  tcp: 127.0.0.1:5354
+  query_timeout: 5s
+
+upstreams:
+  - type: doh
+    url: https://cloudflare-dns.com/dns-query
+    endpoint_ips: [1.1.1.1, 1.0.0.1]
+    timeout: 5s
+
+cache:
+  capacity: 10000
+  min_ttl: 0s
+  max_ttl: 86400s
+  negative_ttl_max: 900s
+
+admin:
+  listen: 127.0.0.1:9090
+
+logging:
+  level: info
+  format: json
+  query_log:
+    enabled: true
+
+shutdown_timeout: 5s
+startup_probe_timeout: 5s

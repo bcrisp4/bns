@@ -4,10 +4,14 @@ listen:
   query_timeout: 5s
 
 upstreams:
-  - addr: "1.1.1.1:53"
+  - type: udp
+    addr: 1.1.1.1:53
     timeout: 2s
-  - addr: "9.9.9.9:53"
-    timeout: 2s
+
+  - type: doh
+    url: https://cloudflare-dns.com/dns-query
+    endpoint_ips: [1.1.1.1, 1.0.0.1]
+    timeout: 5s
 
 cache:
   capacity: 10000
