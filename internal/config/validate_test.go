@@ -106,3 +106,113 @@ func TestValidate_RefreshInterval_MinFloor(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "refresh_interval")
 }
+
+// minimalValidConfig returns a config that passes Validate() — tests overwrite Upstreams.
+func minimalValidConfig() config.Config {
+	return validatableConfig()
+}
+
+func TestValidate_UDP_EmptyTypeDefaults(t *testing.T) {
+	c := minimalValidConfig()
+	c.Upstreams = []config.Upstream{
+		{Addr: "1.1.1.1:53", Timeout: 2 * time.Second},
+	}
+	require.NoError(t, c.Validate())
+}
+
+func TestValidate_UDP_ExplicitType(t *testing.T) {
+	c := minimalValidConfig()
+	c.Upstreams = []config.Upstream{
+		{Type: "udp", Addr: "1.1.1.1:53", Timeout: 2 * time.Second},
+	}
+	require.NoError(t, c.Validate())
+}
+
+func TestValidate_UDP_RejectsDoHFields(t *testing.T) {
+	c := minimalValidConfig()
+	c.Upstreams = []config.Upstream{
+		{Type: "udp", Addr: "1.1.1.1:53", URL: "https://x/dns-query", Timeout: 2 * time.Second},
+	}
+	require.ErrorContains(t, c.Validate(), "url/endpoint_ips not valid for type=udp")
+}
+
+func TestValidate_DoH_HostnameURL_OK(t *testing.T) {
+	c := minimalValidConfig()
+	c.Upstreams = []config.Upstream{
+		{
+			Type:        "doh",
+			URL:         "https://cloudflare-dns.com/dns-query",
+			EndpointIPs: []string{"1.1.1.1", "1.0.0.1"},
+			Timeout:     5 * time.Second,
+		},
+	}
+	require.NoError(t, c.Validate())
+}
+
+func TestValidate_DoH_MissingURL(t *testing.T) {
+	c := minimalValidConfig()
+	c.Upstreams = []config.Upstream{
+		{Type: "doh", EndpointIPs: []string{"1.1.1.1"}, Timeout: 5 * time.Second},
+	}
+	require.ErrorContains(t, c.Validate(), "url is required for type=doh")
+}
+
+func TestValidate_DoH_NonHTTPSScheme(t *testing.T) {
+	c := minimalValidConfig()
+	c.Upstreams = []config.Upstream{
+		{Type: "doh", URL: "http://cloudflare-dns.com/dns-query",
+			EndpointIPs: []string{"1.1.1.1"}, Timeout: 5 * time.Second},
+	}
+	require.ErrorContains(t, c.Validate(), "scheme must be https")
+}
+
+func TestValidate_DoH_IPLiteralURL_Rejected(t *testing.T) {
+	c := minimalValidConfig()
+	c.Upstreams = []config.Upstream{
+		{Type: "doh", URL: "https://1.1.1.1/dns-query", Timeout: 5 * time.Second},
+	}
+	require.ErrorContains(t, c.Validate(), "url host must be a hostname")
+}
+
+func TestValidate_DoH_MissingEndpointIPs(t *testing.T) {
+	c := minimalValidConfig()
+	c.Upstreams = []config.Upstream{
+		{Type: "doh", URL: "https://cloudflare-dns.com/dns-query", Timeout: 5 * time.Second},
+	}
+	require.ErrorContains(t, c.Validate(), "endpoint_ips is required")
+}
+
+func TestValidate_DoH_InvalidEndpointIP(t *testing.T) {
+	c := minimalValidConfig()
+	c.Upstreams = []config.Upstream{
+		{
+			Type:        "doh",
+			URL:         "https://cloudflare-dns.com/dns-query",
+			EndpointIPs: []string{"not-an-ip"},
+			Timeout:     5 * time.Second,
+		},
+	}
+	require.ErrorContains(t, c.Validate(), "not a valid IP")
+}
+
+func TestValidate_DoH_AddrFieldRejected(t *testing.T) {
+	c := minimalValidConfig()
+	c.Upstreams = []config.Upstream{
+		{
+			Type:        "doh",
+			Addr:        "1.1.1.1:53",
+			URL:         "https://cloudflare-dns.com/dns-query",
+			EndpointIPs: []string{"1.1.1.1"},
+			Timeout:     5 * time.Second,
+		},
+	}
+	require.ErrorContains(t, c.Validate(), "addr not valid for type=doh")
+}
+
+func TestValidate_UnknownType(t *testing.T) {
+	c := minimalValidConfig()
+	c.Upstreams = []config.Upstream{
+		{Type: "doq", Addr: "1.1.1.1:853", Timeout: 5 * time.Second},
+	}
+	require.ErrorContains(t, c.Validate(), "must be \"udp\" or \"doh\"")
+}

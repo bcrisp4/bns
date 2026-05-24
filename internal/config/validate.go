@@ -31,11 +31,20 @@ func (c Config) Validate() error {
 		return errors.New("at least one upstream is required")
 	}
 	for i, u := range c.Upstreams {
-		if _, _, err := net.SplitHostPort(u.Addr); err != nil {
-			return fmt.Errorf("upstreams[%d].addr %q: %w", i, u.Addr, err)
-		}
 		if u.Timeout <= 0 {
 			return fmt.Errorf("upstreams[%d].timeout must be > 0", i)
+		}
+		switch u.Type {
+		case "", "udp":
+			if err := validateUDPUpstream(i, u); err != nil {
+				return err
+			}
+		case "doh":
+			if err := validateDoHUpstream(i, u); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("upstreams[%d].type %q must be \"udp\" or \"doh\"", i, u.Type)
 		}
 	}
 	if c.Cache.Capacity <= 0 {
@@ -89,6 +98,51 @@ func (c Config) Validate() error {
 			}
 		default:
 			return fmt.Errorf("blocklists.sources[%d] (%s): type %q must be file or http", i, s.Name, s.Type)
+		}
+	}
+	return nil
+}
+
+func validateUDPUpstream(i int, u Upstream) error {
+	if u.Addr == "" {
+		return fmt.Errorf("upstreams[%d]: addr is required for type=udp", i)
+	}
+	if _, _, err := net.SplitHostPort(u.Addr); err != nil {
+		return fmt.Errorf("upstreams[%d].addr %q: %w", i, u.Addr, err)
+	}
+	if u.URL != "" || len(u.EndpointIPs) > 0 {
+		return fmt.Errorf("upstreams[%d]: url/endpoint_ips not valid for type=udp", i)
+	}
+	return nil
+}
+
+func validateDoHUpstream(i int, u Upstream) error {
+	if u.URL == "" {
+		return fmt.Errorf("upstreams[%d]: url is required for type=doh", i)
+	}
+	parsed, err := url.Parse(u.URL)
+	if err != nil {
+		return fmt.Errorf("upstreams[%d].url %q: %w", i, u.URL, err)
+	}
+	if parsed.Scheme != "https" {
+		return fmt.Errorf("upstreams[%d].url %q: scheme must be https", i, u.URL)
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return fmt.Errorf("upstreams[%d].url %q: missing host", i, u.URL)
+	}
+	if net.ParseIP(host) != nil {
+		return fmt.Errorf("upstreams[%d].url %q: url host must be a hostname, not an IP literal", i, u.URL)
+	}
+	if u.Addr != "" {
+		return fmt.Errorf("upstreams[%d]: addr not valid for type=doh", i)
+	}
+	if len(u.EndpointIPs) == 0 {
+		return fmt.Errorf("upstreams[%d]: endpoint_ips is required for type=doh", i)
+	}
+	for j, ip := range u.EndpointIPs {
+		if net.ParseIP(ip) == nil {
+			return fmt.Errorf("upstreams[%d].endpoint_ips[%d] %q: not a valid IP", i, j, ip)
 		}
 	}
 	return nil
