@@ -196,10 +196,13 @@ func (c *DoHClient) Exchange(ctx context.Context, req *dns.Msg) (*dns.Msg, error
 
 	// RFC 8484 §4.2 + RFC 7231 §3.1.1.1: case-insensitive type token,
 	// parameters (e.g. charset=utf-8) permitted.
-	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if err != nil || !strings.EqualFold(mediaType, dohContentType) {
-		return nil, fmt.Errorf("doh %s: unexpected content-type %q",
-			c.url, resp.Header.Get("Content-Type"))
+	rawCT := resp.Header.Get("Content-Type")
+	mediaType, _, err := mime.ParseMediaType(rawCT)
+	if err != nil {
+		return nil, fmt.Errorf("doh %s: unexpected content-type %q: %w", c.url, rawCT, err)
+	}
+	if !strings.EqualFold(mediaType, dohContentType) {
+		return nil, fmt.Errorf("doh %s: unexpected content-type %q", c.url, rawCT)
 	}
 
 	// RFC 8484 §6 + DoS defense: cap body at the DNS msg size ceiling.

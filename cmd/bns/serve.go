@@ -92,18 +92,6 @@ func bindServeFlags(v *viper.Viper, c *cobra.Command) error {
 	return nil
 }
 
-func setSliceFlag(v *viper.Viper, c *cobra.Command, flagName, viperKey string, build func(string) map[string]any) {
-	if !c.Flag(flagName).Changed {
-		return
-	}
-	vals, _ := c.Flags().GetStringSlice(flagName)
-	out := make([]map[string]any, 0, len(vals))
-	for _, x := range vals {
-		out = append(out, build(x))
-	}
-	v.Set(viperKey, out)
-}
-
 func runServe(ctx context.Context, cfg config.Config) error {
 	logger := logging.New(cfg.Logging, os.Stdout)
 	logger.Info("starting BNS",

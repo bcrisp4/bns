@@ -74,10 +74,10 @@ func TestPool_EmptyIsError(t *testing.T) {
 }
 
 func TestPool_MarksUpstreamOnSuccess(t *testing.T) {
-	okMsg := new(dns.Msg)
-	okMsg.Response = true
+	ok := new(dns.Msg)
+	ok.Response = true
 
-	primary := &fakeUpstream{name: "primary", resp: okMsg}
+	primary := &fakeUpstream{name: "primary", resp: ok}
 	p := upstream.NewPool([]upstream.Upstream{primary}, nil)
 
 	ctx, _ := resolver.WithUpstreamMarker(context.Background())
@@ -107,12 +107,12 @@ func TestPool_NoMarkOnAllFail(t *testing.T) {
 }
 
 func TestPool_MarksSecondaryOnFailover(t *testing.T) {
-	okMsg := new(dns.Msg)
-	okMsg.Response = true
+	ok := new(dns.Msg)
+	ok.Response = true
 
 	p := upstream.NewPool([]upstream.Upstream{
 		&fakeUpstream{name: "primary", err: errors.New("primary-down")},
-		&fakeUpstream{name: "secondary", resp: okMsg},
+		&fakeUpstream{name: "secondary", resp: ok},
 	}, nil)
 
 	ctx, _ := resolver.WithUpstreamMarker(context.Background())

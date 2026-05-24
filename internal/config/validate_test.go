@@ -107,13 +107,8 @@ func TestValidate_RefreshInterval_MinFloor(t *testing.T) {
 	require.Contains(t, err.Error(), "refresh_interval")
 }
 
-// minimalValidConfig returns a config that passes Validate() — tests overwrite Upstreams.
-func minimalValidConfig() config.Config {
-	return validatableConfig()
-}
-
 func TestValidate_UDP_EmptyTypeDefaults(t *testing.T) {
-	c := minimalValidConfig()
+	c := validatableConfig()
 	c.Upstreams = []config.Upstream{
 		{Addr: "1.1.1.1:53", Timeout: 2 * time.Second},
 	}
@@ -121,7 +116,7 @@ func TestValidate_UDP_EmptyTypeDefaults(t *testing.T) {
 }
 
 func TestValidate_UDP_ExplicitType(t *testing.T) {
-	c := minimalValidConfig()
+	c := validatableConfig()
 	c.Upstreams = []config.Upstream{
 		{Type: "udp", Addr: "1.1.1.1:53", Timeout: 2 * time.Second},
 	}
@@ -129,7 +124,7 @@ func TestValidate_UDP_ExplicitType(t *testing.T) {
 }
 
 func TestValidate_UDP_RejectsDoHFields(t *testing.T) {
-	c := minimalValidConfig()
+	c := validatableConfig()
 	c.Upstreams = []config.Upstream{
 		{Type: "udp", Addr: "1.1.1.1:53", URL: "https://x/dns-query", Timeout: 2 * time.Second},
 	}
@@ -137,7 +132,7 @@ func TestValidate_UDP_RejectsDoHFields(t *testing.T) {
 }
 
 func TestValidate_DoH_HostnameURL_OK(t *testing.T) {
-	c := minimalValidConfig()
+	c := validatableConfig()
 	c.Upstreams = []config.Upstream{
 		{
 			Type:        "doh",
@@ -150,7 +145,7 @@ func TestValidate_DoH_HostnameURL_OK(t *testing.T) {
 }
 
 func TestValidate_DoH_MissingURL(t *testing.T) {
-	c := minimalValidConfig()
+	c := validatableConfig()
 	c.Upstreams = []config.Upstream{
 		{Type: "doh", EndpointIPs: []string{"1.1.1.1"}, Timeout: 5 * time.Second},
 	}
@@ -158,7 +153,7 @@ func TestValidate_DoH_MissingURL(t *testing.T) {
 }
 
 func TestValidate_DoH_NonHTTPSScheme(t *testing.T) {
-	c := minimalValidConfig()
+	c := validatableConfig()
 	c.Upstreams = []config.Upstream{
 		{Type: "doh", URL: "http://cloudflare-dns.com/dns-query",
 			EndpointIPs: []string{"1.1.1.1"}, Timeout: 5 * time.Second},
@@ -167,7 +162,7 @@ func TestValidate_DoH_NonHTTPSScheme(t *testing.T) {
 }
 
 func TestValidate_DoH_IPLiteralURL_Rejected(t *testing.T) {
-	c := minimalValidConfig()
+	c := validatableConfig()
 	c.Upstreams = []config.Upstream{
 		{Type: "doh", URL: "https://1.1.1.1/dns-query", Timeout: 5 * time.Second},
 	}
@@ -175,7 +170,7 @@ func TestValidate_DoH_IPLiteralURL_Rejected(t *testing.T) {
 }
 
 func TestValidate_DoH_MissingEndpointIPs(t *testing.T) {
-	c := minimalValidConfig()
+	c := validatableConfig()
 	c.Upstreams = []config.Upstream{
 		{Type: "doh", URL: "https://cloudflare-dns.com/dns-query", Timeout: 5 * time.Second},
 	}
@@ -183,7 +178,7 @@ func TestValidate_DoH_MissingEndpointIPs(t *testing.T) {
 }
 
 func TestValidate_DoH_InvalidEndpointIP(t *testing.T) {
-	c := minimalValidConfig()
+	c := validatableConfig()
 	c.Upstreams = []config.Upstream{
 		{
 			Type:        "doh",
@@ -196,7 +191,7 @@ func TestValidate_DoH_InvalidEndpointIP(t *testing.T) {
 }
 
 func TestValidate_DoH_AddrFieldRejected(t *testing.T) {
-	c := minimalValidConfig()
+	c := validatableConfig()
 	c.Upstreams = []config.Upstream{
 		{
 			Type:        "doh",
@@ -210,7 +205,7 @@ func TestValidate_DoH_AddrFieldRejected(t *testing.T) {
 }
 
 func TestValidate_UnknownType(t *testing.T) {
-	c := minimalValidConfig()
+	c := validatableConfig()
 	c.Upstreams = []config.Upstream{
 		{Type: "doq", Addr: "1.1.1.1:853", Timeout: 5 * time.Second},
 	}
@@ -221,7 +216,7 @@ func TestValidate_HTTPBlocklist_RequiresBootstrapIPs(t *testing.T) {
 	// DoH-only config with file-only blocklist source: no http source,
 	// so no bootstrap needed → passes even though there are zero UDP
 	// upstreams.
-	c := minimalValidConfig()
+	c := validatableConfig()
 	c.Upstreams = []config.Upstream{
 		{
 			Type:        "doh",
@@ -237,7 +232,7 @@ func TestValidate_HTTPBlocklist_RequiresBootstrapIPs(t *testing.T) {
 }
 
 func TestValidate_HTTPBlocklist_WithUDPUpstream_OK(t *testing.T) {
-	c := minimalValidConfig()
+	c := validatableConfig()
 	c.Upstreams = []config.Upstream{
 		{Type: "udp", Addr: "1.1.1.1:53", Timeout: 2 * time.Second},
 	}
@@ -248,7 +243,7 @@ func TestValidate_HTTPBlocklist_WithUDPUpstream_OK(t *testing.T) {
 }
 
 func TestValidate_HTTPBlocklist_WithDoHEndpointIPs_OK(t *testing.T) {
-	c := minimalValidConfig()
+	c := validatableConfig()
 	c.Upstreams = []config.Upstream{
 		{
 			Type:        "doh",
