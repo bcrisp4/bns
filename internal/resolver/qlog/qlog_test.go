@@ -126,6 +126,55 @@ func TestQLog_DisabledReturnsNextUnchanged(t *testing.T) {
 	require.Same(t, resolver.Resolver(next), r, "disabled qlog must not wrap next")
 }
 
+func TestQlog_EmitsUpstreamAttrsWhenMarkerSet(t *testing.T) {
+	cap := &captureQL{}
+	next := resolver.ResolverFunc(func(ctx context.Context, req *dns.Msg) (*dns.Msg, error) {
+		resolver.MarkUpstream(ctx, "https://cloudflare-dns.com/dns-query", "doh")
+		r := new(dns.Msg)
+		r.Response = true
+		r.ID = req.ID
+		r.Question = req.Question
+		return r, nil
+	})
+	r := qlog.New(next, cap)
+
+	ctx, _ := resolver.WithUpstreamMarker(context.Background())
+	req := dns.NewMsg("example.com.", dns.TypeA)
+	_, err := r.Resolve(ctx, req)
+	require.NoError(t, err)
+
+	require.Len(t, cap.entries, 1)
+	got := map[string]string{}
+	for _, a := range cap.entries[0] {
+		got[a.Key] = a.Value.String()
+	}
+	require.Equal(t, "https://cloudflare-dns.com/dns-query", got["upstream"])
+	require.Equal(t, "doh", got["upstream_protocol"])
+}
+
+func TestQlog_OmitsUpstreamAttrsWhenMarkerUnset(t *testing.T) {
+	cap := &captureQL{}
+	next := resolver.ResolverFunc(func(_ context.Context, req *dns.Msg) (*dns.Msg, error) {
+		// No MarkUpstream call — simulates cache hit / block / coalesce piggyback.
+		r := new(dns.Msg)
+		r.Response = true
+		r.ID = req.ID
+		r.Question = req.Question
+		return r, nil
+	})
+	r := qlog.New(next, cap)
+
+	req := dns.NewMsg("example.com.", dns.TypeA)
+	_, err := r.Resolve(context.Background(), req)
+	require.NoError(t, err)
+
+	require.Len(t, cap.entries, 1)
+	for _, a := range cap.entries[0] {
+		require.NotEqual(t, "upstream", a.Key, "upstream must be omitted when marker unset")
+		require.NotEqual(t, "upstream_protocol", a.Key, "upstream_protocol must be omitted when marker unset")
+	}
+}
+
 func BenchmarkQLog_Baseline(b *testing.B) {
 	next := &stubResolver{resp: new(dns.Msg)}
 	req := dns.NewMsg("example.com.", dns.TypeA)

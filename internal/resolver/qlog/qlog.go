@@ -40,7 +40,7 @@ func (s *stage) Resolve(ctx context.Context, req *dns.Msg) (*dns.Msg, error) {
 		qtype = dns.TypeToString[dns.RRToType(q0)]
 	}
 
-	attrs := make([]slog.Attr, 4, 6)
+	attrs := make([]slog.Attr, 4, 8)
 	attrs[0] = slog.String("qname", qname)
 	attrs[1] = slog.String("qtype", qtype)
 	attrs[2] = slog.String("outcome", resolver.Outcome(ctx, resp, err))
@@ -51,6 +51,12 @@ func (s *stage) Resolve(ctx context.Context, req *dns.Msg) (*dns.Msg, error) {
 		if info.Proto != "" {
 			attrs = append(attrs, slog.String("proto", info.Proto))
 		}
+	}
+	if info, present := resolver.UpstreamInfoFrom(ctx); present {
+		attrs = append(attrs,
+			slog.String("upstream", info.Name),
+			slog.String("upstream_protocol", info.Protocol),
+		)
 	}
 	s.q.LogQuery(attrs...)
 	return resp, err
