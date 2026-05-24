@@ -49,7 +49,6 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().String("listen.udp", "", `UDP listen address host:port (default ":53")`)
 	cmd.Flags().String("listen.tcp", "", `TCP listen address host:port (default ":53")`)
 	cmd.Flags().Duration("listen.query-timeout", 0, "Per-query handling timeout (default 5s)")
-	cmd.Flags().StringSlice("upstream", nil, "Upstream resolver addr host:port; repeat for multiple (no default; required)")
 	cmd.Flags().Int("cache.capacity", 0, "Maximum cached DNS responses (default 10000)")
 	cmd.Flags().Duration("cache.min-ttl", 0, "Floor applied to cached entry TTL (default 0s)")
 	cmd.Flags().Duration("cache.max-ttl", 0, "Ceiling applied to cached entry TTL (default 24h)")
@@ -90,12 +89,6 @@ func bindServeFlags(v *viper.Viper, c *cobra.Command) error {
 		}
 	}
 
-	// --upstream bypasses BindPFlag: viper cannot expand a scalar StringSlice
-	// flag into a nested []struct shape. Build the payload manually and v.Set,
-	// which has higher precedence than YAML/env.
-	setSliceFlag(v, c, "upstream", "upstreams", func(addr string) map[string]any {
-		return map[string]any{"addr": addr, "timeout": "2s"}
-	})
 	return nil
 }
 
@@ -115,7 +108,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	logger := logging.New(cfg.Logging, os.Stdout)
 	logger.Info("starting BNS",
 		"udp", cfg.Listen.UDP, "tcp", cfg.Listen.TCP,
-		"admin", cfg.Admin.Listen, "upstreams", upstreamAddrs(cfg.Upstreams))
+		"admin", cfg.Admin.Listen, "upstreams", upstreamLabels(cfg.Upstreams))
 
 	reg := prometheus.NewRegistry()
 	mtr := metrics.New(reg)
@@ -140,7 +133,7 @@ func runServe(ctx context.Context, cfg config.Config) error {
 	// Bootstrap resolver for the fetcher: dial configured upstream IPs
 	// directly, bypassing the system stub (which may point at this very
 	// BNS process when BNS is the LAN's sole resolver).
-	bootstrapResolver := blocklist.NewBootstrapResolver(upstreamAddrs(cfg.Upstreams))
+	bootstrapResolver := blocklist.NewBootstrapResolver(upstreamDialAddrs(cfg.Upstreams))
 	httpClient := &http.Client{
 		Timeout: 60 * time.Second,
 		Transport: &http.Transport{
@@ -196,7 +189,11 @@ func runServe(ctx context.Context, cfg config.Config) error {
 
 	ups := make([]upstream.Upstream, 0, len(cfg.Upstreams))
 	for _, u := range cfg.Upstreams {
-		ups = append(ups, upstream.NewUDPClient(u.Addr, u.Timeout))
+		client, err := upstream.New(u, logger, mtr)
+		if err != nil {
+			return fmt.Errorf("build upstream: %w", err)
+		}
+		ups = append(ups, client)
 	}
 	pool := upstream.NewPool(ups, mtr)
 
@@ -323,10 +320,44 @@ func warmupProbe(ctx context.Context, p upstream.Upstream, timeout time.Duration
 	return err
 }
 
-func upstreamAddrs(ups []config.Upstream) []string {
+// upstreamDialAddrs returns the union of host:port forms usable for
+// dialing plain DNS bootstrap queries during HTTP blocklist fetches:
+//   - UDP upstream addrs verbatim (e.g. "1.1.1.1:53")
+//   - DoH endpoint_ips paired with :53
+//
+// Assumes the same IPs serving DoH on :443 also serve plain UDP/TCP
+// DNS on :53. True for every major public provider (Cloudflare, Google,
+// Quad9, AdGuard, NextDNS, Mullvad); known limitation for self-hosted
+// DoH-only endpoints — see docs/TODO.md "DoH upstream" entry.
+func upstreamDialAddrs(ups []config.Upstream) []string {
+	var out []string
+	for _, u := range ups {
+		switch u.Type {
+		case "", "udp":
+			if u.Addr != "" {
+				out = append(out, u.Addr)
+			}
+		case "doh":
+			for _, ip := range u.EndpointIPs {
+				out = append(out, net.JoinHostPort(ip, "53"))
+			}
+		}
+	}
+	return out
+}
+
+// upstreamLabels returns a human-readable label per upstream for the
+// startup log: addr for UDP, URL for DoH. Distinct from upstreamDialAddrs
+// which returns host:port forms for the blocklist bootstrap resolver.
+func upstreamLabels(ups []config.Upstream) []string {
 	out := make([]string, len(ups))
 	for i, u := range ups {
-		out[i] = u.Addr
+		switch u.Type {
+		case "doh":
+			out[i] = u.URL
+		default:
+			out[i] = u.Addr
+		}
 	}
 	return out
 }

@@ -121,9 +121,13 @@ logging:
 
 // String flag (--logging.level) wins over env (flag > env precedence).
 func TestServeFlags_FlagOverridesEnv(t *testing.T) {
+	yaml := writeYAML(t, `
+upstreams:
+  - addr: "1.1.1.1:53"
+    timeout: 2s
+`)
 	t.Setenv("BNS_LOGGING__LEVEL", "error")
-	cfg := loadWithArgs(t, "",
-		"--upstream", "1.1.1.1:53",
+	cfg := loadWithArgs(t, yaml,
 		"--logging.level", "debug",
 	)
 	require.Equal(t, "debug", cfg.Logging.Level)
