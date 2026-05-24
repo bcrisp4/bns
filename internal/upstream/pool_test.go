@@ -27,6 +27,9 @@ func (f *fakeUpstream) Exchange(_ context.Context, req *dns.Msg) (*dns.Msg, erro
 	return r, nil
 }
 
+func (f *fakeUpstream) Name() string     { return f.name }
+func (f *fakeUpstream) Protocol() string { return "udp" }
+
 func TestPool_PrimarySucceeds(t *testing.T) {
 	ok := new(dns.Msg)
 	ok.Response = true

@@ -51,3 +51,10 @@ func (c *UDPClient) Exchange(ctx context.Context, req *dns.Msg) (*dns.Msg, error
 	}
 	return resp, nil
 }
+
+// Name returns the configured upstream address (e.g. "1.1.1.1:53").
+// Used as the "upstream" metric label.
+func (c *UDPClient) Name() string { return c.addr }
+
+// Protocol returns "udp".
+func (c *UDPClient) Protocol() string { return "udp" }

@@ -24,6 +24,9 @@ func (s *stubUpstream) Exchange(_ context.Context, req *dns.Msg) (*dns.Msg, erro
 	return r, nil
 }
 
+func (s *stubUpstream) Name() string     { return "stub" }
+func (s *stubUpstream) Protocol() string { return "udp" }
+
 func TestBuild_BlocklistShortCircuits(t *testing.T) {
 	okResp := new(dns.Msg)
 	okResp.Response = true

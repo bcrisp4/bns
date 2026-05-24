@@ -35,6 +35,13 @@ func (p *Pool) name(i int) string {
 	return fmt.Sprintf("upstream[%d]", i)
 }
 
+// Name returns "pool" — Pool is an aggregate and does not have a single
+// upstream address. Individual upstream names are tracked per-exchange.
+func (p *Pool) Name() string { return "pool" }
+
+// Protocol returns "pool" — Pool is an aggregate of one or more transports.
+func (p *Pool) Protocol() string { return "pool" }
+
 // Exchange tries each upstream in order. Returns the first success.
 // If all fail, returns errors.Join of all failures.
 func (p *Pool) Exchange(ctx context.Context, req *dns.Msg) (*dns.Msg, error) {
