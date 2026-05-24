@@ -76,11 +76,46 @@ func ClientInfoFrom(ctx context.Context) (ClientInfo, bool) {
 	return v, ok
 }
 
-// MarkUpstream is a placeholder added in this task to keep the tree
-// compiling. The real implementation lands in Task 4 (UpstreamInfo
-// ctx-marker triad). DO NOT add new callers beyond Pool.Exchange.
+// UpstreamInfo describes the upstream that served a query. Recorded by
+// Pool.Exchange on success; read by the qlog stage so each forwarded
+// query log line identifies which forwarder served it.
+//
+// Empty Name signals "no upstream was used" (cache hit, blocked query,
+// coalesce piggyback).
+type UpstreamInfo struct {
+	Name     string // e.g. "1.1.1.1:53" for UDP, the URL for DoH
+	Protocol string // "udp" | "doh"
+}
+
+type upstreamInfoKey struct{}
+
+// WithUpstreamMarker installs a fresh upstream-info marker in ctx and
+// returns the new context plus a pointer the caller can later inspect.
+// The metrics stage calls this on every query so downstream stages
+// (Pool) can record which upstream served the query.
+func WithUpstreamMarker(ctx context.Context) (context.Context, *UpstreamInfo) {
+	var info UpstreamInfo
+	return context.WithValue(ctx, upstreamInfoKey{}, &info), &info
+}
+
+// MarkUpstream sets the upstream marker on ctx (if present). Pool calls
+// this immediately after a successful per-upstream Exchange. Safe to
+// call on a ctx with no marker installed (no-op).
 func MarkUpstream(ctx context.Context, name, protocol string) {
-	_ = ctx
-	_ = name
-	_ = protocol
+	if info, ok := ctx.Value(upstreamInfoKey{}).(*UpstreamInfo); ok && info != nil {
+		info.Name = name
+		info.Protocol = protocol
+	}
+}
+
+// UpstreamInfoFrom returns the recorded upstream info from ctx. Returns
+// (UpstreamInfo{}, false) when no marker is installed OR when the
+// marker exists but has not been set (Name == "") — the qlog stage
+// uses this to omit upstream attrs cleanly for cache hits and blocks.
+func UpstreamInfoFrom(ctx context.Context) (UpstreamInfo, bool) {
+	info, ok := ctx.Value(upstreamInfoKey{}).(*UpstreamInfo)
+	if !ok || info == nil || info.Name == "" {
+		return UpstreamInfo{}, false
+	}
+	return *info, true
 }
