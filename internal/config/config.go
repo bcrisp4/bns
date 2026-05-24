@@ -25,9 +25,18 @@ type Listen struct {
 }
 
 // Upstream is one configured upstream DNS server.
+//
+// Type selects the transport: "udp" (default) or "doh". For type=udp,
+// Addr is required (host:port form). For type=doh, URL is required
+// (https://hostname/path form) and EndpointIPs must be non-empty
+// (operator-pinned IPs that DialContext substitutes for the URL host;
+// hostname is retained for SNI / cert validation).
 type Upstream struct {
-	Addr    string        `mapstructure:"addr"`
-	Timeout time.Duration `mapstructure:"timeout"`
+	Type        string        `mapstructure:"type"`         // "udp" | "doh"; default "udp"
+	Addr        string        `mapstructure:"addr"`         // type=udp only
+	URL         string        `mapstructure:"url"`          // type=doh only
+	EndpointIPs []string      `mapstructure:"endpoint_ips"` // type=doh only; required, non-empty
+	Timeout     time.Duration `mapstructure:"timeout"`
 }
 
 // Cache configures the in-memory LRU cache.
