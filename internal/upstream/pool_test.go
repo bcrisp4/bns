@@ -7,6 +7,7 @@ import (
 
 	"codeberg.org/miekg/dns"
 	"codeberg.org/miekg/dns/dnsutil"
+	"github.com/bcrisp4/bns/internal/resolver"
 	"github.com/bcrisp4/bns/internal/upstream"
 	"github.com/stretchr/testify/require"
 )
@@ -70,4 +71,55 @@ func TestPool_EmptyIsError(t *testing.T) {
 	p := upstream.NewPool(nil, nil)
 	_, err := p.Exchange(context.Background(), new(dns.Msg))
 	require.Error(t, err)
+}
+
+func TestPool_MarksUpstreamOnSuccess(t *testing.T) {
+	okMsg := new(dns.Msg)
+	okMsg.Response = true
+
+	primary := &fakeUpstream{name: "primary", resp: okMsg}
+	p := upstream.NewPool([]upstream.Upstream{primary}, nil)
+
+	ctx, _ := resolver.WithUpstreamMarker(context.Background())
+	req := dns.NewMsg("example.com.", dns.TypeA)
+
+	_, err := p.Exchange(ctx, req)
+	require.NoError(t, err)
+
+	info, present := resolver.UpstreamInfoFrom(ctx)
+	require.True(t, present)
+	require.Equal(t, "primary", info.Name)
+	require.Equal(t, "udp", info.Protocol)
+}
+
+func TestPool_NoMarkOnAllFail(t *testing.T) {
+	p := upstream.NewPool([]upstream.Upstream{
+		&fakeUpstream{name: "a", err: errors.New("a-fail")},
+		&fakeUpstream{name: "b", err: errors.New("b-fail")},
+	}, nil)
+
+	ctx, _ := resolver.WithUpstreamMarker(context.Background())
+	_, err := p.Exchange(ctx, dns.NewMsg("example.com.", dns.TypeA))
+	require.Error(t, err)
+
+	_, present := resolver.UpstreamInfoFrom(ctx)
+	require.False(t, present, "marker must stay unset when no upstream succeeds")
+}
+
+func TestPool_MarksSecondaryOnFailover(t *testing.T) {
+	okMsg := new(dns.Msg)
+	okMsg.Response = true
+
+	p := upstream.NewPool([]upstream.Upstream{
+		&fakeUpstream{name: "primary", err: errors.New("primary-down")},
+		&fakeUpstream{name: "secondary", resp: okMsg},
+	}, nil)
+
+	ctx, _ := resolver.WithUpstreamMarker(context.Background())
+	_, err := p.Exchange(ctx, dns.NewMsg("example.com.", dns.TypeA))
+	require.NoError(t, err)
+
+	info, present := resolver.UpstreamInfoFrom(ctx)
+	require.True(t, present)
+	require.Equal(t, "secondary", info.Name)
 }

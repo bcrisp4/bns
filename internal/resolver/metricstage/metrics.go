@@ -26,6 +26,7 @@ func New(next resolver.Resolver, m *metrics.Metrics) resolver.Resolver {
 func (s *stage) Resolve(ctx context.Context, req *dns.Msg) (resp *dns.Msg, err error) {
 	start := time.Now()
 	ctx, _ = resolver.WithBlockMarker(ctx)
+	ctx, _ = resolver.WithUpstreamMarker(ctx)
 
 	defer func() {
 		if r := recover(); r != nil {
