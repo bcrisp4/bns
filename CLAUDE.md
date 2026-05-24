@@ -145,6 +145,7 @@ Import path `codeberg.org/miekg/dns` (NO `/v2` suffix despite v2). Field/functio
 - `Msg.Copy()` shallow on RR slices. For pool-safe deep copies use `cache.CloneMsg` which clones each RR via `rr.Clone()`.
 - TC=1 truncation does NOT auto-retry — caller dials TCP explicit (see `internal/upstream/udp_client.go`).
 - **RR construction shape changed.** Header is `dns.Header` (not `dns.RR_Header`), TTL uppercase (no `Ttl`), no `Rrtype` field on Header. `dns.A`/`AAAA`/`NS`/`SOA` embed `rdata.X` sub-struct: `dns.A{Hdr: dns.Header{...}, A: rdata.A{Addr: netip.MustParseAddr("1.2.3.4")}}`. Field accessors work via promotion (`a.Hdr.TTL`, `ns.Ns`) but construction needs sub-struct.
+- **Reliable `Msg.Pack()` error trigger for tests:** a Question with a 64-char label (label length >= 64 violates RFC 1035 §2.3.4, hits miekg's pack.Name `labelLen >= 1<<6` guard). Used for `defer`-restore-on-Pack-fail tests in `internal/upstream/doh_client_test.go`.
 
 Vendored offline reference: `/home/ben.guest/vendor/miekg-dns-v2/`.
 
@@ -173,6 +174,8 @@ Vendored offline reference: `/home/ben.guest/vendor/miekg-dns-v2/`.
 - `make lint` — golangci-lint (NOT installed locally; CI only)
 - `make tidy` — go mod tidy
 
+Test helpers: `metrics.NewForTest()` returns a `*Metrics` registered to a fresh `prometheus.NewRegistry()` — use in any unit test that needs to construct `*Metrics` without polluting the default registerer. `internal/upstream/testutil.NewTLSCert(t, hosts)` generates a self-signed cert with mixed DNS / IP SANs (split via `net.ParseIP`); pair with `httptest.NewUnstartedServer` + `srv.TLS.Certificates` + `StartTLS()` for any DoH/h2 test.
+
 ## Gotchas
 
 - **Port 5353 is mDNS.** avahi-daemon / systemd-resolved listens on UDP/5353; bind there give `address already in use` on UDP only (TCP bind succeeds, mask cause). Use 5354 or other free port.
@@ -199,6 +202,11 @@ Vendored offline reference: `/home/ben.guest/vendor/miekg-dns-v2/`.
   Assumes the same IPs serving DoH on `:443` also serve plain UDP/TCP DNS on `:53` — true
   for every major public provider, documented limitation for self-hosted DoH-only
   endpoints (see `docs/TODO.md`).
+- **httptest TLS servers need explicit `NextProtos: []string{"h2", "http/1.1"}`** on
+  `srv.TLS` before `StartTLS()`. Without it, the stdlib TLS handshake offers no ALPN
+  protocols and the client silently falls back to HTTP/1.1 — tests for h2-specific
+  behaviour (multiplexing, push refusal) become no-ops. miekg/dns v2's `dnshttp` pkg
+  doc carries the same warning.
 
 ## Stress harness
 
