@@ -136,6 +136,12 @@ func New(reg prometheus.Registerer) *Metrics {
 	return m
 }
 
+// NewForTest returns a Metrics with a fresh private registry; safe to use
+// in tests without polluting the global default registerer.
+func NewForTest() *Metrics {
+	return New(prometheus.NewRegistry())
+}
+
 // BlocklistFetcherMetrics returns the adapter wiring the Fetcher's
 // metric hooks into this Metrics bundle.
 func (m *Metrics) BlocklistFetcherMetrics() blocklist.FetcherMetrics {
