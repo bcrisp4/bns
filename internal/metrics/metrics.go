@@ -34,6 +34,8 @@ type Metrics struct {
 	BlocklistFetchTotal           *prometheus.CounterVec
 	BlocklistLastSuccessTimestamp *prometheus.GaugeVec
 	BlocklistEntriesBySource      *prometheus.GaugeVec
+	DoHHTTPStatusTotal            *prometheus.CounterVec
+	DoHTLSHandshakesTotal         *prometheus.CounterVec
 }
 
 // New constructs the bundle, registers every collector with reg, and
@@ -98,6 +100,14 @@ func New(reg prometheus.Registerer) *Metrics {
 			Name: "bns_blocklist_entries_by_source",
 			Help: "Parsed entry count per source after the most recent successful fetch.",
 		}, []string{"source"}),
+		DoHHTTPStatusTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "bns_doh_http_status_total",
+			Help: "DoH HTTP responses, by upstream and HTTP status code.",
+		}, []string{"upstream", "status"}),
+		DoHTLSHandshakesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "bns_doh_tls_handshakes_total",
+			Help: "DoH TLS handshakes, by upstream and result. High rate indicates connection churn.",
+		}, []string{"upstream", "result"}),
 	}
 
 	reg.MustRegister(
@@ -107,6 +117,7 @@ func New(reg prometheus.Registerer) *Metrics {
 		m.BlocklistEntries, m.BlocklistLoadedTimestamp, m.BlocklistReloadsTotal,
 		m.CoalescedQueriesTotal, m.PanicsTotal,
 		m.BlocklistFetchTotal, m.BlocklistLastSuccessTimestamp, m.BlocklistEntriesBySource,
+		m.DoHHTTPStatusTotal, m.DoHTLSHandshakesTotal,
 	)
 	reg.MustRegister(collectors.NewGoCollector())
 	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
