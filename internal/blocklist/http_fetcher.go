@@ -133,6 +133,9 @@ func (f *Fetcher) FetchOne(ctx context.Context, t FetchTarget) FetchResult {
 	if resp.StatusCode == http.StatusNotModified {
 		res.Outcome = FetchOutcomeNotModified
 		f.markSuccess(t.Name, start)
+		// Re-report the persisted count (304 implies prevMeta is a real cache
+		// entry) so the gauge stays populated for sources loaded from cache.
+		f.setEntries(t.Name, prevMeta.Entries)
 		return res
 	}
 	if resp.StatusCode != http.StatusOK {

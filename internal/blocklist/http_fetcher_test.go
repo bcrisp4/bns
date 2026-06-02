@@ -66,6 +66,46 @@ func TestFetcher_FetchOne_304LeavesCacheUntouched(t *testing.T) {
 	require.Equal(t, 2, calls)
 }
 
+func TestFetcher_FetchOne_304SetsEntriesGauge(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") == `"v1"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", `"v1"`)
+		_, _ = w.Write([]byte("example.com\nads.example\n"))
+	}))
+	t.Cleanup(srv.Close)
+
+	var lastEntries, entriesCalls int
+	store := blocklist.NewCacheStore(t.TempDir())
+	f := blocklist.NewFetcher(blocklist.FetcherConfig{
+		Store:    store,
+		Client:   srv.Client(),
+		Interval: time.Hour,
+		Metrics: blocklist.FetcherMetrics{
+			SetEntries: func(_ string, n int) {
+				lastEntries = n
+				entriesCalls++
+			},
+		},
+	})
+	target := blocklist.FetchTarget{Name: "x", URL: srv.URL}
+
+	res1 := f.FetchOne(context.Background(), target)
+	require.Equal(t, blocklist.FetchOutcomeSuccess, res1.Outcome)
+	require.Equal(t, 1, entriesCalls)
+	require.Equal(t, 2, lastEntries)
+
+	// A 304 must still report the entry count from the persisted cache,
+	// otherwise the gauge goes absent for sources that load from cache.
+	lastEntries, entriesCalls = 0, 0
+	res2 := f.FetchOne(context.Background(), target)
+	require.Equal(t, blocklist.FetchOutcomeNotModified, res2.Outcome)
+	require.Equal(t, 1, entriesCalls)
+	require.Equal(t, 2, lastEntries)
+}
+
 func TestFetcher_FetchOne_5xxKeepsCacheReturnsFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
